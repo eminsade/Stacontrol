@@ -30,7 +30,7 @@ def _get_base_bridge_url() -> str:
     return BRIDGE_URL
 
 
-def _fetch_from_bridge(endpoint: str, params: dict = None, timeout: float = 6.0):
+def _fetch_from_bridge(endpoint: str, params: dict = None, timeout: float = 30.0):
     """Bridge yerel HTTP sunucusundan veya HTTPS tünelinden JSON veri çeker."""
     base_url = _get_base_bridge_url()
     url = f"{base_url}{endpoint}"

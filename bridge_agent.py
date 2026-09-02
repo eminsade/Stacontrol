@@ -70,7 +70,6 @@ def get_table_df(SapModel, table_name, group="All", combo=None, case=None):
             selection_list = [case] if isinstance(case, str) else list(case)
 
         if selection_list:
-            # Hem LoadCases hem LoadCombinations icinde sec
             SapModel.DatabaseTables.SetLoadCasesSelectedForDisplay(selection_list)
             SapModel.DatabaseTables.SetLoadCombinationsSelectedForDisplay(selection_list)
             SapModel.DatabaseTables.SetLoadPatternsSelectedForDisplay(selection_list)
@@ -199,26 +198,31 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                     "pier_forces": df_forces.to_dict(orient="records")
                 })
 
-            # 6. Kolon Kapasite Paketi (Column Bundle)
+            # 6. Kolon Kapasite Paketi (Column Bundle) - Hizli Tekil Sorgu
             elif path == "/api/column_bundle":
                 combo = query_params.get("combo", [""])[0]
                 ts500_combo = query_params.get("ts500_combo", [""])[0]
 
+                combos_to_query = [c for c in list(dict.fromkeys([combo, ts500_combo])) if c]
+                df_raw = get_table_df(SapModel, 'Element Forces - Columns', combo=combos_to_query) if combos_to_query else pd.DataFrame()
+                
                 df_forces = pd.DataFrame()
-                if combo:
-                    df_raw = get_table_df(SapModel, 'Element Forces - Columns', combo=combo)
-                    if not df_raw.empty and 'P' in df_raw.columns:
-                        df_raw['P'] = pd.to_numeric(df_raw['P'], errors='coerce')
-                        max_idx = df_raw.groupby(['Story', 'Column'], sort=False)['P'].apply(lambda x: x.abs().idxmax())
-                        df_forces = df_raw.loc[max_idx].sort_index().reset_index(drop=True)[['Story', 'Column', 'OutputCase', 'P']]
-
                 df_ts500 = pd.DataFrame()
-                if ts500_combo:
-                    df_raw_ts500 = get_table_df(SapModel, 'Element Forces - Columns', combo=ts500_combo)
-                    if not df_raw_ts500.empty and 'P' in df_raw_ts500.columns:
-                        df_raw_ts500['P'] = pd.to_numeric(df_raw_ts500['P'], errors='coerce')
-                        max_idx2 = df_raw_ts500.groupby(['Story', 'Column'], sort=False)['P'].apply(lambda x: x.abs().idxmax())
-                        df_ts500 = df_raw_ts500.loc[max_idx2].sort_index().reset_index(drop=True)[['Story', 'Column', 'OutputCase', 'P']]
+
+                if not df_raw.empty and 'P' in df_raw.columns:
+                    df_raw['P'] = pd.to_numeric(df_raw['P'], errors='coerce')
+                    
+                    if combo:
+                        df_c = df_raw[df_raw['OutputCase'] == combo]
+                        if not df_c.empty:
+                            max_idx = df_c.groupby(['Story', 'Column'], sort=False)['P'].apply(lambda x: x.abs().idxmax())
+                            df_forces = df_c.loc[max_idx].sort_index().reset_index(drop=True)[['Story', 'Column', 'OutputCase', 'P']]
+                            
+                    if ts500_combo:
+                        df_t = df_raw[df_raw['OutputCase'] == ts500_combo]
+                        if not df_t.empty:
+                            max_idx2 = df_t.groupby(['Story', 'Column'], sort=False)['P'].apply(lambda x: x.abs().idxmax())
+                            df_ts500 = df_t.loc[max_idx2].sort_index().reset_index(drop=True)[['Story', 'Column', 'OutputCase', 'P']]
 
                 df_assignments = get_table_df(SapModel, 'Frame Assignments - Section Properties')
                 df_defs = get_table_df(SapModel, 'Frame Section Property Definitions - Summary')
