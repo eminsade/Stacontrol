@@ -12,7 +12,7 @@ else:
 def render_bridge_status(key="etabs_bridge_status_widget"):
     """
     Kullanıcının tarayıcısından yerel http://127.0.0.1:8765 adresini sorgular.
-    Durumu ekranda gösterir, tünel adresini, kombinasyonları ve yük durumlarını Streamlit oturumuna aktarır.
+    Durumu ekranda gösterir, tünel adresini kalıcı olarak oturuma ve query param'a kaydeder.
     """
     if _bridge_component is None:
         return None
@@ -22,15 +22,23 @@ def render_bridge_status(key="etabs_bridge_status_widget"):
         if res.get("etabs_connected"):
             st.session_state["etabs_connected"] = True
             st.session_state["etabs_model_name"] = res.get("model_name", "Aktif Model")
-            if res.get("tunnel_url"):
-                st.session_state["bridge_url"] = res.get("tunnel_url")
+            
+            tunnel = res.get("tunnel_url")
+            if tunnel:
+                st.session_state["bridge_url"] = tunnel
+                try:
+                    st.query_params["bridge"] = tunnel
+                except Exception:
+                    pass
+
             if res.get("combinations"):
                 st.session_state["etabs_combinations"] = res.get("combinations", [])
             if res.get("load_cases"):
                 st.session_state["etabs_load_cases"] = res.get("load_cases", [])
             st.session_state["etabs_info"] = res
         else:
-            st.session_state["etabs_connected"] = False
+            if not st.session_state.get("bridge_url"):
+                st.session_state["etabs_connected"] = False
     return res
 
 def fetch_bundle(*args, **kwargs):
