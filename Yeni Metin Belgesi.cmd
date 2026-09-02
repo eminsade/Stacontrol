@@ -1,0 +1,1 @@
+streamlit run C:\Users\Emin\Desktop\deneme2\anasayfa.py
