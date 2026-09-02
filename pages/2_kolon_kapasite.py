@@ -8,7 +8,7 @@ from database import save_hesaplama, get_hesaplama_by_id
 from utils import top_right_login, to_excel
 from session_config import init_session_state
 from constants import CONCRETE_OPTIONS
-from bridge_client import render_bridge_status, fetch_bundle
+from bridge_client import render_bridge_status
 import etabs_service
 
 # Sayfa konfigürasyonu

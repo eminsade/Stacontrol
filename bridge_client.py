@@ -32,3 +32,7 @@ def render_bridge_status(key="etabs_bridge_status_widget"):
         else:
             st.session_state["etabs_connected"] = False
     return res
+
+def fetch_bundle(*args, **kwargs):
+    """Geriye dönük uyumluluk için yardımcı fonksiyon."""
+    return None
