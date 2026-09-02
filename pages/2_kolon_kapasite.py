@@ -140,53 +140,14 @@ with tabs[0]:
         # Buton ile veri çekme
         if st.button("Kontrol Et / Tabloyu Getir"):
             with st.spinner("ETABS kolon verileri alınıyor..."):
-                # 1. Yerel COM'dan dene
-                SapModel = etabs_service.get_active_sap_model()
-                if SapModel is not None:
-                    def get_table_for_combination(combo):
-                        SapModel.DatabaseTables.SetLoadCasesSelectedForDisplay([])
-                        SapModel.DatabaseTables.SetLoadCombinationsSelectedForDisplay([combo])
-                        SapModel.DatabaseTables.SetLoadPatternsSelectedForDisplay([])
-                        ret = SapModel.DatabaseTables.GetTableForDisplayArray('Element Forces - Columns', [], 'All', 1, [], 0, [])
-                        columns, data_list = ret[2], ret[4]
-                        if not columns:
-                            return None
-                        rows = [data_list[i:i + len(columns)] for i in range(0, len(data_list), len(columns))]
-                        df = pd.DataFrame(rows, columns=columns).apply(lambda x: x.str.strip() if x.dtype == "object" else x)
-                        df['P'] = pd.to_numeric(df['P'], errors='coerce')
-                        max_idx = df.groupby(['Story', 'Column'], sort=False)['P'].apply(lambda x: x.abs().idxmax())
-                        return df.loc[max_idx].sort_index().reset_index(drop=True)[['Story', 'Column', 'OutputCase', 'P']]
+                bundle = etabs_service.get_column_bundle(combo=main_deprem_combo, ts500_combo=main_dusey_combo)
+                df_deprem = bundle.get("column_forces", pd.DataFrame())
+                df_dusey = bundle.get("ts500_forces", pd.DataFrame())
+                df_assign = bundle.get("frame_assignments", pd.DataFrame())
+                df_defs = bundle.get("section_definitions", pd.DataFrame())
 
-                    df_dusey = get_table_for_combination(main_dusey_combo)
-                    df_deprem = get_table_for_combination(main_deprem_combo)
-                    
-                    ret_assign = SapModel.DatabaseTables.GetTableForDisplayArray('Frame Assignments - Section Properties', [], 'All', 1, [], 0, [])
-                    cols_a, data_a = ret_assign[2], ret_assign[4]
-                    rows_a = [data_a[i:i + len(cols_a)] for i in range(0, len(data_a), len(cols_a))]
-                    df_assign = pd.DataFrame(rows_a, columns=cols_a).apply(lambda x: x.str.strip() if x.dtype == "object" else x)
-
-                    ret_defs = SapModel.DatabaseTables.GetTableForDisplayArray('Frame Section Property Definitions - Summary', [], 'All', 1, [], 0, [])
-                    cols_d, data_d = ret_defs[2], ret_defs[4]
-                    if not cols_d:
-                        ret_defs = SapModel.DatabaseTables.GetTableForDisplayArray('Frame Section Property Definitions - Concrete Rectangular', [], 'All', 1, [], 0, [])
-                        cols_d, data_d = ret_defs[2], ret_defs[4]
-                    rows_d = [data_d[i:i + len(cols_d)] for i in range(0, len(data_d), len(cols_d))]
-                    df_defs = pd.DataFrame(rows_d, columns=cols_d).apply(lambda x: x.str.strip() if x.dtype == "object" else x)
-
-                else:
-                    # 2. Bridge API'den dene
-                    resp = fetch_bundle("/api/column_bundle", params={"combo": main_deprem_combo, "ts500_combo": main_dusey_combo})
-                    if resp and resp.get("success"):
-                        df_deprem = pd.DataFrame(resp.get("column_forces", []))
-                        df_dusey = pd.DataFrame(resp.get("ts500_forces", []))
-                        df_assign = pd.DataFrame(resp.get("frame_assignments", []))
-                        df_defs = pd.DataFrame(resp.get("section_definitions", []))
-                    else:
-                        st.error("ETABS'ten kolon verileri alınamadı.")
-                        st.stop()
-
-                if df_dusey is None or df_deprem is None or df_dusey.empty or df_deprem.empty:
-                    st.error("Kombinasyon verileri okunamadı.")
+                if df_dusey.empty or df_deprem.empty:
+                    st.error("ETABS'ten kolon verileri alınamadı. Lütfen ETABS'te kombinasyonların çözülmüş olduğundan ve STACONT Bridge'in çalıştığından emin olun.")
                     st.stop()
 
                 df_dusey = df_dusey.rename(columns={'OutputCase': 'Düşey Kombinasyon', 'P': 'Düşey Yük'})

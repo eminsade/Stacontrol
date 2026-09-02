@@ -1,16 +1,16 @@
 """
 STACONT Bridge Agent
 --------------------
-Kullanıcının yerel bilgisayarında arka planda çalışan, açık ETABS oturumuna
-bağlanan ve web tarayıcısındaki STACONT uygulamasına veri aktaran yerel HTTP köprü servisi.
+Kullanıcının yerel bilgisayarında çalışan, açık ETABS oturumuna bağlanan
+ve web üzerindeki STACONT platformuna güvenli HTTPS tüneli üzerinden veri sunan köprü servisi.
 
 Çalıştırma: python bridge_agent.py
-Varsayılan Port: 8765
 """
 
 import json
 import os
 import sys
+import threading
 import urllib.parse
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
@@ -24,8 +24,28 @@ try:
 except ImportError:
     COMTYPES_AVAILABLE = False
 
+# Cloudflare Tunnel desteği (Sıfır ayar ile bulut erişimi)
+TUNNEL_URL = ""
+try:
+    from pycloudflared import try_cloudflare
+    CLOUDFLARED_AVAILABLE = True
+except ImportError:
+    CLOUDFLARED_AVAILABLE = False
+
 PORT = 8765
 HOST = "127.0.0.1"
+
+def start_tunnel_async():
+    global TUNNEL_URL
+    if CLOUDFLARED_AVAILABLE:
+        try:
+            print("🌐 Güvenli Cloudflare HTTPS Tüneli başlatılıyor...")
+            t = try_cloudflare(port=PORT)
+            if hasattr(t, 'tunnel') and t.tunnel:
+                TUNNEL_URL = t.tunnel
+                print(f"🔗 Genel Köprü Adresi: {TUNNEL_URL}")
+        except Exception as e:
+            print(f"Tünel başlatma uyarısı: {e}")
 
 def get_sap_model():
     """Aktif ETABS SapModel nesnesine bağlanır."""
@@ -111,18 +131,21 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                         "etabs_connected": True,
                         "model_name": file_name,
                         "model_path": file_path,
+                        "tunnel_url": TUNNEL_URL,
                         "version": "1.0.0"
                     })
                 except Exception as e:
                     self._send_json({
                         "status": "warning",
                         "etabs_connected": False,
+                        "tunnel_url": TUNNEL_URL,
                         "error": str(e)
                     })
             else:
                 self._send_json({
                     "status": "disconnected",
                     "etabs_connected": False,
+                    "tunnel_url": TUNNEL_URL,
                     "error": err or "ETABS açık değil."
                 })
             return
@@ -146,7 +169,13 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                 cases = list(ret_cases[1]) if ret_cases[0] > 0 else []
                 self._send_json({"success": True, "load_cases": cases})
 
-            # 4. Perde Kesme / Kapasite Paketi (Pier Bundle)
+            # 4. Kat İsimleri (Stories)
+            elif path == "/api/stories":
+                ret_stories = SapModel.Story.GetNameList()
+                stories = list(ret_stories[1]) if ret_stories[0] > 0 else []
+                self._send_json({"success": True, "stories": stories})
+
+            # 5. Perde Kesme / Kapasite Paketi (Pier Bundle)
             elif path == "/api/pier_bundle":
                 combo = query_params.get("combo", [""])[0]
                 df_props = get_table_df(SapModel, 'Pier Section Properties')
@@ -164,7 +193,7 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                     "pier_forces": df_forces.to_dict(orient="records")
                 })
 
-            # 5. Kolon Kapasite Paketi (Column Bundle)
+            # 6. Kolon Kapasite Paketi (Column Bundle)
             elif path == "/api/column_bundle":
                 combo = query_params.get("combo", [""])[0]
                 ts500_combo = query_params.get("ts500_combo", [""])[0]
@@ -198,26 +227,6 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                     "section_definitions": df_defs.to_dict(orient="records")
                 })
 
-            # 6. Göreli Kat Ötelemesi Paketi (Drift Bundle)
-            elif path == "/api/drift_bundle":
-                case_x = query_params.get("case_x", [""])[0]
-                case_y = query_params.get("case_y", [""])[0]
-                
-                df_drifts = pd.DataFrame()
-                cases = [c for c in [case_x, case_y] if c]
-                if cases:
-                    df_drifts = get_table_df(SapModel, 'Story Drifts', case=cases)
-                else:
-                    df_drifts = get_table_df(SapModel, 'Story Drifts')
-
-                df_modal = get_table_df(SapModel, 'Modal Participating Mass Ratios')
-
-                self._send_json({
-                    "success": True,
-                    "story_drifts": df_drifts.to_dict(orient="records"),
-                    "modal_ratios": df_modal.to_dict(orient="records")
-                })
-
             # 7. Genel Tablo Sorgulama
             elif path == "/api/table":
                 table_name = query_params.get("name", [""])[0]
@@ -246,6 +255,11 @@ def run_server():
     print(f"📍 Adres: http://{HOST}:{PORT}")
     print(f"💡 STACONT web arayüzü açıkken bu pencereyi açık tutun.")
     print("=" * 60)
+    
+    # Arka planda Cloudflare HTTPS tüneli aç
+    t_thread = threading.Thread(target=start_tunnel_async, daemon=True)
+    t_thread.start()
+
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
