@@ -1,5 +1,4 @@
 import io
-import comtypes.client
 import streamlit as st
 # Sayfa konfigürasyonu
 st.set_page_config(
@@ -11,11 +10,11 @@ st.set_page_config(
 from sidebar import setup_sidebar
 import pandas as pd
 import json
+import etabs_service
 from st_aggrid import AgGrid, GridUpdateMode, DataReturnMode
 from database import save_hesaplama, get_hesaplamalar, get_hesaplama_by_id
 from utils import top_right_login
 from session_config import init_session_state
-from database import save_hesaplama
 
 
 
@@ -26,9 +25,6 @@ setup_sidebar()
 
 # Sağ üstte giriş/kayıt butonları
 top_right_login()
-
-# COM kütüphanesini başlatma
-comtypes.CoInitialize()
 
 st.title("Kolon Eksenel Kuvvet Kontrolü")
 
@@ -169,11 +165,9 @@ with tabs[0]:
             st.error("Kayıt bulunamadı veya erişim yetkiniz yok.")
     else:
         # Yeni hesaplama modu
-        try:
-            etabs_object = comtypes.client.GetActiveObject("CSI.ETABS.API.ETABSObject")
-            SapModel = etabs_object.SapModel
-        except Exception as e:
-            st.error(f"ETABS'e bağlanılırken hata oluştu: {e}")
+        SapModel = etabs_service.get_active_sap_model()
+        if SapModel is None:
+            st.error("ETABS'e bağlanılamadı. Lütfen STACONT Bridge'in ve ETABS modelinizin açık olduğundan emin olun.")
             st.stop()
 
         try:

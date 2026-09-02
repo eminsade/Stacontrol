@@ -1,12 +1,12 @@
 import io
-import comtypes.client
 import streamlit as st
 import json
 import pandas as pd
+import etabs_service
 from st_aggrid import AgGrid, GridUpdateMode, DataReturnMode
-from database import save_hesaplama, get_hesaplamalar, get_hesaplama_by_id  # Assuming these are defined elsewhere
-from utils import top_right_login  # Assuming this is defined elsewhere
-from session_config import init_session_state  # Assuming this is defined elsewhere
+from database import save_hesaplama, get_hesaplamalar, get_hesaplama_by_id
+from utils import top_right_login
+from session_config import init_session_state
 
 # Streamlit page config
 st.set_page_config(
@@ -160,18 +160,10 @@ if saved_id:
     else:
         st.error("Kayıt bulunamadı veya erişim yetkiniz yok.")
 else:
-    # ETABS bağlantısı ve birimler
-    try:
-        etabs_object = comtypes.client.GetActiveObject("CSI.ETABS.API.ETABSObject")
-        SapModel = etabs_object.SapModel
-    except Exception as e:
-        st.error(f"ETABS'e bağlanılırken hata oluştu: {e}")
-        st.stop()
-
-    try:
-        SapModel.SetPresentUnits(6)  # Birim: kN, mm, C
-    except Exception as e:
-        st.error(f"ETABS birimleri ayarlanırken hata oluştu: {e}")
+    # ETABS bağlantısı
+    SapModel = etabs_service.get_active_sap_model()
+    if SapModel is None:
+        st.error("ETABS'e bağlanılamadı. Lütfen STACONT Bridge'in ve ETABS modelinizin açık olduğundan emin olun.")
         st.stop()
 
     # Yük kombinasyonları

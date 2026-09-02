@@ -8,10 +8,10 @@ st.set_page_config(
 )
 from sidebar import setup_sidebar
 import pandas as pd
-import comtypes.client
 from collections import Counter
 import numpy as np
 import plotly.graph_objects as go
+import etabs_service
 
 from database import save_hesaplama, get_hesaplamalar
 from utils import top_right_login
@@ -30,14 +30,11 @@ st.title("ETABS Metraj ve 3D Model Görselleştirme")
 
 # Initialize ETABS connection
 with st.spinner("ETABS'e bağlanılıyor..."):
-    comtypes.CoInitialize()
-    try:
-        etabs_object = comtypes.client.GetActiveObject("CSI.ETABS.API.ETABSObject")
-        SapModel = etabs_object.SapModel
-        st.success("ETABS'e başarıyla bağlanıldı!")
-    except Exception as e:
-        st.error(f"ETABS'e bağlanılırken hata oluştu: {e}")
+    SapModel = etabs_service.get_active_sap_model()
+    if SapModel is None:
+        st.error("ETABS'e bağlanılamadı. Lütfen STACONT Bridge'in ve ETABS modelinizin açık olduğundan emin olun.")
         st.stop()
+    st.success("ETABS'e başarıyla bağlanıldı!")
 
     # Set units to ton-meter
     SapModel.SetPresentUnits(12)

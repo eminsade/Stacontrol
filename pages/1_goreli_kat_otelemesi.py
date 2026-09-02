@@ -6,16 +6,14 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 from sidebar import setup_sidebar
-import comtypes
-import comtypes.client
 import pandas as pd
 import plotly.graph_objects as go
 import json
 import io
+import etabs_service
 
 from database import save_hesaplama, get_hesaplamalar
 from utils import top_right_login
-from database import save_hesaplama
 from session_config import init_session_state
 
 
@@ -35,10 +33,6 @@ st.title("Göreli Kat Ötelemesi Kontrolü")
 tabs = st.tabs(["Hesaplama", "ℹ️"])
 
 with tabs[0]:
-
-
-    # COM kütüphanesini başlatıyoruz
-    comtypes.CoInitialize()
 
     # -------------------------------------------------------------------------
     # URL'deki saved_id kontrolü (Query Params)
@@ -130,12 +124,9 @@ with tabs[0]:
     # 1. ETABS'e Bağlanma
     # =============================================================================
     with st.container():
-        try:
-            etabs_object = comtypes.client.GetActiveObject("CSI.ETABS.API.ETABSObject")
-            SapModel = etabs_object.SapModel
-
-        except Exception as e:
-            st.error(f"ETABS'e bağlanılırken hata oluştu: {e}")
+        SapModel = etabs_service.get_active_sap_model()
+        if SapModel is None:
+            st.error("ETABS'e bağlanılamadı. Lütfen STACONT Bridge'in ve ETABS modelinizin açık olduğundan emin olun.")
             st.stop()
 
     # =============================================================================

@@ -1,5 +1,4 @@
 import io
-import comtypes.client
 import streamlit as st
 import json
 
@@ -12,11 +11,11 @@ st.set_page_config(
 from sidebar import setup_sidebar
 
 import pandas as pd
+import etabs_service
 from st_aggrid import AgGrid, GridUpdateMode, DataReturnMode
 from database import save_hesaplama, get_hesaplamalar, get_hesaplama_by_id
 from utils import top_right_login
 from session_config import init_session_state
-from database import save_hesaplama
 
 # Session state başlatma
 init_session_state()
@@ -25,9 +24,6 @@ setup_sidebar()
 
 # Sağ üstte giriş/kayıt butonları
 top_right_login()
-
-# COM kütüphanesini başlat
-comtypes.CoInitialize()
 
 st.title("Perde Kapasite Kontrolü")
 
@@ -144,18 +140,9 @@ with tabs[0]:
             st.error("Kayıt bulunamadı veya erişim yetkiniz yok.")
     else:
         # Yeni hesaplama modu
-        # ETABS'e bağlan ve birimleri ayarla
-        try:
-            etabs_object = comtypes.client.GetActiveObject("CSI.ETABS.API.ETABSObject")
-            SapModel = etabs_object.SapModel
-        except Exception as e:
-            st.error(f"ETABS'e bağlanılırken hata oluştu: {e}")
-            st.stop()
-
-        try:
-            SapModel.SetPresentUnits(6)  # kN-m birimleri
-        except Exception as e:
-            st.error(f"ETABS birimleri ayarlanırken hata oluştu: {e}")
+        SapModel = etabs_service.get_active_sap_model()
+        if SapModel is None:
+            st.error("ETABS'e bağlanılamadı. Lütfen STACONT Bridge'in ve ETABS modelinizin açık olduğundan emin olun.")
             st.stop()
 
         # Yük kombinasyonlarını al
