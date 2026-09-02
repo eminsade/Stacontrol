@@ -63,14 +63,17 @@ def get_sap_model():
 def get_table_df(SapModel, table_name, group="All", combo=None, case=None):
     """ETABS DatabaseTables uzerinden tabloyu pandas DataFrame olarak ceker."""
     try:
+        selection_list = []
         if combo:
-            SapModel.DatabaseTables.SetLoadCasesSelectedForDisplay([])
-            SapModel.DatabaseTables.SetLoadCombinationsSelectedForDisplay([combo] if isinstance(combo, str) else combo)
-            SapModel.DatabaseTables.SetLoadPatternsSelectedForDisplay([])
+            selection_list = [combo] if isinstance(combo, str) else list(combo)
         elif case:
-            SapModel.DatabaseTables.SetLoadCasesSelectedForDisplay([case] if isinstance(case, str) else case)
-            SapModel.DatabaseTables.SetLoadCombinationsSelectedForDisplay([])
-            SapModel.DatabaseTables.SetLoadPatternsSelectedForDisplay([])
+            selection_list = [case] if isinstance(case, str) else list(case)
+
+        if selection_list:
+            # Hem LoadCases hem LoadCombinations icinde sec
+            SapModel.DatabaseTables.SetLoadCasesSelectedForDisplay(selection_list)
+            SapModel.DatabaseTables.SetLoadCombinationsSelectedForDisplay(selection_list)
+            SapModel.DatabaseTables.SetLoadPatternsSelectedForDisplay(selection_list)
         else:
             SapModel.DatabaseTables.SetLoadCasesSelectedForDisplay([])
             SapModel.DatabaseTables.SetLoadCombinationsSelectedForDisplay([])
@@ -157,11 +160,14 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             return
 
         try:
-            # 2. Yuk Kombinasyonlari
+            # 2. Yuk Kombinasyonlari ve Durumlari
             if path == "/api/combinations":
                 ret_combos = SapModel.RespCombo.GetNameList()
                 combos = list(ret_combos[1]) if ret_combos[0] > 0 else []
-                self._send_json({"success": True, "combinations": combos})
+                ret_cases = SapModel.LoadCases.GetNameList()
+                cases = list(ret_cases[1]) if ret_cases[0] > 0 else []
+                all_combos = sorted(list(dict.fromkeys(combos + cases)))
+                self._send_json({"success": True, "combinations": all_combos})
 
             # 3. Yuk Durumlari (Load Cases)
             elif path == "/api/load_cases":
@@ -239,7 +245,11 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                     return
 
                 df = get_table_df(SapModel, table_name, group=group_name, combo=combo or None, case=case or None)
-                self._send_json({"success": True, "data": df.to_dict(orient="records"), "columns": list(df.columns)})
+                self._send_json({
+                    "success": True, 
+                    "data": df.to_dict(orient="records"), 
+                    "columns": list(df.columns)
+                })
 
             else:
                 self._send_json({"error": "Endpoint bulunamadi.", "path": path}, status_code=404)
