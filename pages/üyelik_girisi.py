@@ -7,13 +7,11 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 from sidebar import setup_sidebar
-# Gerekli fonksiyonları içe aktarıyoruz
 from utils import hash_password, cookies
 from database import verify_user
 from session_config import init_session_state
 
 init_session_state()
-
 setup_sidebar()
 
 st.title("Üyelik Girişi")
@@ -21,7 +19,7 @@ st.title("Üyelik Girişi")
 # Eğer kullanıcı zaten giriş yaptıysa anasayfaya yönlendir
 if st.session_state.get("logged_in", False):
     st.info("Giriş Yapıldı!")
-    st.switch_page("Anasayfa.py")  # Anasayfaya yönlendirme
+    st.switch_page("anasayfa.py")
 else:
     with st.form("login_form"):
         username = st.text_input("Kullanıcı Adı")
@@ -35,13 +33,15 @@ else:
                     st.session_state["logged_in"] = True
                     st.session_state["username"] = username
 
-                    # Çerezlere kaydet
-                    cookies["logged_in"] = "True"
-                    cookies["username"] = username
-                    cookies.save()
+                    try:
+                        cookies["logged_in"] = "True"
+                        cookies["username"] = username
+                        cookies.save()
+                    except Exception:
+                        pass
 
                     st.success(f"Hoşgeldiniz, {username}!")
-                    st.switch_page("Anasayfa.py")  # Anasayfaya yönlendirme
+                    st.switch_page("anasayfa.py")
                 else:
                     st.error("Geçersiz kullanıcı adı veya şifre")
             else:

@@ -3,20 +3,32 @@ import io
 import streamlit as st
 import hashlib
 import pandas as pd
-from streamlit_cookies_manager import EncryptedCookieManager
 from session_config import init_session_state
 
-# 1. Çerez Yöneticisini Başlatma
-cookies = EncryptedCookieManager(
-    prefix="my_app/",
-    password=os.environ.get("COOKIES_PASSWORD", "My secret password"),
-)
+# Modern Streamlit uyumluluk yaması (eski kütüphanelerin st.cache hatasını önler)
+if not hasattr(st, "cache"):
+    st.cache = st.cache_resource
 
-# 2. Çerez Hazır mı Kontrolü (HAYATİ KISIM)
-if not cookies.ready():
-    st.stop()
+# Güvenli Çerez Yöneticisi Başlatma
+try:
+    from streamlit_cookies_manager import EncryptedCookieManager
+    cookies = EncryptedCookieManager(
+        prefix="my_app/",
+        password=os.environ.get("COOKIES_PASSWORD", "MySecretPassword123!"),
+    )
+    if not cookies.ready():
+        # Çerez hazır değilse sayfayı dondurmak yerine session_state ile devam et
+        pass
+except Exception:
+    class DummyCookies(dict):
+        def ready(self):
+            return True
+        def save(self):
+            pass
+        def get(self, k, default=None):
+            return super().get(k, default)
+    cookies = DummyCookies()
 
-# 3. Session State Başlatma
 init_session_state()
 
 def hash_password(password: str) -> str:
@@ -44,9 +56,13 @@ def top_right_login():
     col1, col2 = st.columns([8, 2])
     
     with col2:
-        if cookies.get("logged_in") == "True":
-            st.session_state["logged_in"] = True
-            st.session_state["username"] = cookies.get("username", "")
+        try:
+            if hasattr(cookies, 'ready') and cookies.ready():
+                if cookies.get("logged_in") == "True":
+                    st.session_state["logged_in"] = True
+                    st.session_state["username"] = cookies.get("username", "")
+        except Exception:
+            pass
 
         if st.session_state.get("logged_in", False):
             welcome_col, logout_col = st.columns([1.5, 1])
@@ -62,9 +78,12 @@ def top_right_login():
             with logout_col:
                 if st.button("Çıkış Yap", type="primary", use_container_width=True):
                     st.session_state.clear()
-                    cookies["logged_in"] = "False"
-                    cookies["username"] = ""
-                    cookies.save()
+                    try:
+                        cookies["logged_in"] = "False"
+                        cookies["username"] = ""
+                        cookies.save()
+                    except Exception:
+                        pass
                     st.rerun()
 
         else:
