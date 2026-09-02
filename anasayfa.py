@@ -14,7 +14,7 @@ st.set_page_config(
 from sidebar import setup_sidebar
 from utils import top_right_login
 from session_config import init_session_state
-from etabs_service import check_etabs_status
+from bridge_client import render_bridge_status
 
 # Initialize session state
 init_session_state()
@@ -23,9 +23,6 @@ setup_sidebar()
 
 # Right-top login/register buttons
 top_right_login()
-
-# ETABS Durumu Kontrolü
-etabs_info = check_etabs_status()
 
 # Enhanced CSS styles for a professional look
 st.markdown("""
@@ -59,41 +56,8 @@ st.markdown("""
         color: #64748b;
         text-align: center;
         max-width: 900px;
-        margin: 0 auto 20px auto;
-        line-height: 1.5;
-    }
-    
-    .etabs-file-info {
-        font-size: 15px;
-        color: #15803d;
-        text-align: center;
-        font-weight: 600;
-        background-color: #f0fdf4;
-        border: 1px solid #bbf7d0;
-        padding: 10px 20px;
-        border-radius: 8px;
-        margin: 0 auto 25px auto;
-        max-width: 800px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-    }
-    .etabs-file-info-warn {
-        font-size: 14px;
-        color: #b45309;
-        text-align: center;
-        font-weight: 600;
-        background-color: #fef3c7;
-        border: 1px solid #fde68a;
-        padding: 10px 20px;
-        border-radius: 8px;
         margin: 0 auto 15px auto;
-        max-width: 800px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
+        line-height: 1.5;
     }
 
     .card {
@@ -202,20 +166,11 @@ st.markdown(f"""
     <div class='subtitle'>TBDY 2018 ve TS 500 uyumlu otomatik betonarme yapı elemanları analiz ve kontrol platformu</div>
 """, unsafe_allow_html=True)
 
-# ETABS dosya bilgisi ve indirme alanı
-if etabs_info["connected"]:
-    st.markdown(f"""
-        <div class='etabs-file-info'>
-            <span>🟢</span> <b>ETABS Bağlandı:</b> {etabs_info['model_name']} ({etabs_info['mode'].upper()} modu aktif)
-        </div>
-    """, unsafe_allow_html=True)
-else:
-    st.markdown(f"""
-        <div class='etabs-file-info-warn'>
-            <span>⚠️</span> <b>ETABS Bağlantısı Bekleniyor:</b> Web üzerinden otomatik analiz için yerel bilgisayarınızda <b>STACONT Bridge</b>'i başlatınız.
-        </div>
-    """, unsafe_allow_html=True)
+# Canlı ETABS Bağlantı Durumu (Kullanıcı Tarayıcısından Sorgulanır)
+bridge_status = render_bridge_status()
 
+# İndirme Kılavuzu
+if not st.session_state.get("etabs_connected", False):
     with st.expander("📥 STACONT Bridge'i İndir ve 3 Adımda Bağlan", expanded=False):
         st.markdown("""
         **Nasıl Bağlanılır?**
@@ -224,7 +179,6 @@ else:
         3. Sayfayı yenileyin; yukarıdaki durum **🟢 ETABS Bağlandı** olarak güncellenecektir!
         """)
         
-        # Bridge dosyalarını okuma
         bridge_py_path = os.path.join(os.path.dirname(__file__), "bridge_agent.py")
         bridge_bat_path = os.path.join(os.path.dirname(__file__), "STACONT_Bridge_Baslat.bat")
         

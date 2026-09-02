@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 13px;
+      background: transparent;
+    }
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-weight: 600;
+      width: 100%;
+      box-sizing: border-box;
+      justify-content: center;
+    }
+    .connected {
+      background-color: #f0fdf4;
+      color: #15803d;
+      border: 1px solid #bbf7d0;
+    }
+    .disconnected {
+      background-color: #fef3c7;
+      color: #b45309;
+      border: 1px solid #fde68a;
+    }
+  </style>
+</head>
+<body>
+  <div id="status-box"></div>
+
+  <script>
+    function sendToStreamlit(data) {
+      window.parent.postMessage({
+        isStreamlitMessage: true,
+        type: "streamlit:setComponentValue",
+        value: data
+      }, "*");
+    }
+
+    function setHeight(h) {
+      window.parent.postMessage({
+        isStreamlitMessage: true,
+        type: "streamlit:setFrameHeight",
+        height: h || 45
+      }, "*");
+    }
+
+    async function queryBridge(endpoint, params) {
+      let url = "http://127.0.0.1:8765" + endpoint;
+      if (params && Object.keys(params).length > 0) {
+        const qs = new URLSearchParams(params).toString();
+        url += "?" + qs;
+      }
+      try {
+        const response = await fetch(url, { 
+          method: "GET",
+          headers: { "Accept": "application/json" }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          return data;
+        } else {
+          return { success: false, error: "HTTP " + response.status };
+        }
+      } catch (err) {
+        return { success: false, etabs_connected: false, error: err.message };
+      }
+    }
+
+    async function onRender(event) {
+      const args = event.data.args || {};
+      const action = args.action || "status";
+      const endpoint = args.endpoint || "/status";
+      const params = args.params || {};
+
+      const result = await queryBridge(endpoint, params);
+      const box = document.getElementById("status-box");
+
+      if (action === "status") {
+        if (result && result.etabs_connected) {
+          box.innerHTML = `<div class="status-badge connected">🟢 <b>ETABS Bağlandı:</b> ${result.model_name || 'Aktif Model'}</div>`;
+        } else {
+          box.innerHTML = `<div class="status-badge disconnected">⚠️ <b>ETABS Bağlantısı Bekleniyor:</b> Yerel bilgisayarınızda STACONT Bridge'i çalıştırınız.</div>`;
+        }
+      }
+      
+      setHeight(48);
+      sendToStreamlit(result);
+    }
+
+    window.addEventListener("message", function(event) {
+      if (event.data.type === "streamlit:render") {
+        onRender(event);
+      }
+    });
+
+    window.parent.postMessage({
+      isStreamlitMessage: true,
+      type: "streamlit:componentReady",
+      apiVersion: 1
+    }, "*");
+  </script>
+</body>
+</html>
