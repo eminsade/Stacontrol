@@ -40,6 +40,34 @@ def get_sap_model():
     except Exception as e:
         return None, f"ETABS bağlantı hatası: {str(e)}"
 
+def get_table_df(SapModel, table_name, group="All", combo=None, case=None):
+    """ETABS DatabaseTables üzerinden tabloyu pandas DataFrame olarak çeker."""
+    try:
+        if combo:
+            SapModel.DatabaseTables.SetLoadCasesSelectedForDisplay([])
+            SapModel.DatabaseTables.SetLoadCombinationsSelectedForDisplay([combo] if isinstance(combo, str) else combo)
+            SapModel.DatabaseTables.SetLoadPatternsSelectedForDisplay([])
+        elif case:
+            SapModel.DatabaseTables.SetLoadCasesSelectedForDisplay([case] if isinstance(case, str) else case)
+            SapModel.DatabaseTables.SetLoadCombinationsSelectedForDisplay([])
+            SapModel.DatabaseTables.SetLoadPatternsSelectedForDisplay([])
+        else:
+            SapModel.DatabaseTables.SetLoadCasesSelectedForDisplay([])
+            SapModel.DatabaseTables.SetLoadCombinationsSelectedForDisplay([])
+            SapModel.DatabaseTables.SetLoadPatternsSelectedForDisplay([])
+
+        ret = SapModel.DatabaseTables.GetTableForDisplayArray(table_name, [], group, 1, [], 0, [])
+        if not ret[2]:
+            return pd.DataFrame()
+        cols = [c.strip() for c in ret[2]]
+        num_cols = len(cols)
+        raw_data = ret[4]
+        rows = [raw_data[i:i + num_cols] for i in range(0, len(raw_data), num_cols)]
+        return pd.DataFrame(rows, columns=cols).apply(lambda x: x.str.strip() if x.dtype == "object" else x)
+    except Exception as e:
+        print(f"Tablo çekme hatası ({table_name}): {e}")
+        return pd.DataFrame()
+
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
 
@@ -118,49 +146,79 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                 cases = list(ret_cases[1]) if ret_cases[0] > 0 else []
                 self._send_json({"success": True, "load_cases": cases})
 
-            # 4. Pier Section Properties
-            elif path == "/api/pier_section_properties":
-                ret = SapModel.DatabaseTables.GetTableForDisplayArray('Pier Section Properties', [], 'All', 1, [], 0, [])
-                if not ret[2]:
-                    self._send_json({"success": False, "error": "Pier Section Properties tablosu boş veya alınamadı."})
-                    return
-                cols = [c.strip() for c in ret[2]]
-                num_cols = len(cols)
-                raw_data = ret[4]
-                records = [dict(zip(cols, raw_data[i:i + num_cols])) for i in range(0, len(raw_data), num_cols)]
-                self._send_json({"success": True, "data": records, "columns": cols})
-
-            # 5. Pier Forces (Seçilen kombinasyon için maksimum V2)
-            elif path == "/api/pier_forces":
+            # 4. Perde Kesme / Kapasite Paketi (Pier Bundle)
+            elif path == "/api/pier_bundle":
                 combo = query_params.get("combo", [""])[0]
-                if not combo:
-                    self._send_json({"success": False, "error": "combo parametresi gerekli."}, status_code=400)
-                    return
-                
-                SapModel.DatabaseTables.SetLoadCasesSelectedForDisplay([])
-                SapModel.DatabaseTables.SetLoadCombinationsSelectedForDisplay([combo])
-                SapModel.DatabaseTables.SetLoadPatternsSelectedForDisplay([])
-                ret = SapModel.DatabaseTables.GetTableForDisplayArray('Pier Forces', [], 'All', 1, [], 0, [])
-                if not ret[2]:
-                    self._send_json({"success": False, "error": f"Tablo verisi alınamadı: {combo}"})
-                    return
-                
-                cols = [c.strip() for c in ret[2]]
-                num_cols = len(cols)
-                raw_data = ret[4]
-                rows = [raw_data[i:i + num_cols] for i in range(0, len(raw_data), num_cols)]
-                df = pd.DataFrame(rows, columns=cols)
-                df['V2'] = pd.to_numeric(df['V2'], errors='coerce')
-                max_idx = df.groupby(['Story', 'Pier'])['V2'].apply(lambda x: x.abs().idxmax())
-                res_df = df.loc[max_idx].sort_index().reset_index(drop=True)[['Story', 'Pier', 'OutputCase', 'V2']]
+                df_props = get_table_df(SapModel, 'Pier Section Properties')
+                df_forces = pd.DataFrame()
+                if combo:
+                    df_raw_forces = get_table_df(SapModel, 'Pier Forces', combo=combo)
+                    if not df_raw_forces.empty and 'V2' in df_raw_forces.columns:
+                        df_raw_forces['V2'] = pd.to_numeric(df_raw_forces['V2'], errors='coerce')
+                        max_idx = df_raw_forces.groupby(['Story', 'Pier'])['V2'].apply(lambda x: x.abs().idxmax())
+                        df_forces = df_raw_forces.loc[max_idx].sort_index().reset_index(drop=True)[['Story', 'Pier', 'OutputCase', 'V2', 'P']]
                 
                 self._send_json({
-                    "success": True, 
-                    "data": res_df.to_dict(orient="records"),
-                    "columns": list(res_df.columns)
+                    "success": True,
+                    "pier_section": df_props.to_dict(orient="records"),
+                    "pier_forces": df_forces.to_dict(orient="records")
                 })
 
-            # 6. Genel Tablo Sorgulama (Table by Name)
+            # 5. Kolon Kapasite Paketi (Column Bundle)
+            elif path == "/api/column_bundle":
+                combo = query_params.get("combo", [""])[0]
+                ts500_combo = query_params.get("ts500_combo", [""])[0]
+
+                df_forces = pd.DataFrame()
+                if combo:
+                    df_raw = get_table_df(SapModel, 'Element Forces - Columns', combo=combo)
+                    if not df_raw.empty and 'P' in df_raw.columns:
+                        df_raw['P'] = pd.to_numeric(df_raw['P'], errors='coerce')
+                        max_idx = df_raw.groupby(['Story', 'Column'], sort=False)['P'].apply(lambda x: x.abs().idxmax())
+                        df_forces = df_raw.loc[max_idx].sort_index().reset_index(drop=True)[['Story', 'Column', 'OutputCase', 'P']]
+
+                df_ts500 = pd.DataFrame()
+                if ts500_combo:
+                    df_raw_ts500 = get_table_df(SapModel, 'Element Forces - Columns', combo=ts500_combo)
+                    if not df_raw_ts500.empty and 'P' in df_raw_ts500.columns:
+                        df_raw_ts500['P'] = pd.to_numeric(df_raw_ts500['P'], errors='coerce')
+                        max_idx2 = df_raw_ts500.groupby(['Story', 'Column'], sort=False)['P'].apply(lambda x: x.abs().idxmax())
+                        df_ts500 = df_raw_ts500.loc[max_idx2].sort_index().reset_index(drop=True)[['Story', 'Column', 'OutputCase', 'P']]
+
+                df_assignments = get_table_df(SapModel, 'Frame Assignments - Section Properties')
+                df_defs = get_table_df(SapModel, 'Frame Section Property Definitions - Summary')
+                if df_defs.empty:
+                    df_defs = get_table_df(SapModel, 'Frame Section Property Definitions - Concrete Rectangular')
+
+                self._send_json({
+                    "success": True,
+                    "column_forces": df_forces.to_dict(orient="records"),
+                    "ts500_forces": df_ts500.to_dict(orient="records"),
+                    "frame_assignments": df_assignments.to_dict(orient="records"),
+                    "section_definitions": df_defs.to_dict(orient="records")
+                })
+
+            # 6. Göreli Kat Ötelemesi Paketi (Drift Bundle)
+            elif path == "/api/drift_bundle":
+                case_x = query_params.get("case_x", [""])[0]
+                case_y = query_params.get("case_y", [""])[0]
+                
+                df_drifts = pd.DataFrame()
+                cases = [c for c in [case_x, case_y] if c]
+                if cases:
+                    df_drifts = get_table_df(SapModel, 'Story Drifts', case=cases)
+                else:
+                    df_drifts = get_table_df(SapModel, 'Story Drifts')
+
+                df_modal = get_table_df(SapModel, 'Modal Participating Mass Ratios')
+
+                self._send_json({
+                    "success": True,
+                    "story_drifts": df_drifts.to_dict(orient="records"),
+                    "modal_ratios": df_modal.to_dict(orient="records")
+                })
+
+            # 7. Genel Tablo Sorgulama
             elif path == "/api/table":
                 table_name = query_params.get("name", [""])[0]
                 group_name = query_params.get("group", ["All"])[0]
@@ -171,21 +229,8 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                     self._send_json({"success": False, "error": "name parametresi gerekli."}, status_code=400)
                     return
 
-                if combo:
-                    SapModel.DatabaseTables.SetLoadCombinationsSelectedForDisplay([combo])
-                if case:
-                    SapModel.DatabaseTables.SetLoadCasesSelectedForDisplay([case])
-
-                ret = SapModel.DatabaseTables.GetTableForDisplayArray(table_name, [], group_name, 1, [], 0, [])
-                if not ret[2]:
-                    self._send_json({"success": False, "error": f"Tablo boş veya bulunamadı: {table_name}"})
-                    return
-
-                cols = [c.strip() for c in ret[2]]
-                num_cols = len(cols)
-                raw_data = ret[4]
-                records = [dict(zip(cols, raw_data[i:i + num_cols])) for i in range(0, len(raw_data), num_cols)]
-                self._send_json({"success": True, "data": records, "columns": cols})
+                df = get_table_df(SapModel, table_name, group=group_name, combo=combo or None, case=case or None)
+                self._send_json({"success": True, "data": df.to_dict(orient="records"), "columns": list(df.columns)})
 
             else:
                 self._send_json({"error": "Endpoint bulunamadı.", "path": path}, status_code=404)

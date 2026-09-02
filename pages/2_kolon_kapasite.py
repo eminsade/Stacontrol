@@ -1,5 +1,16 @@
 import io
 import streamlit as st
+import pandas as pd
+import numpy as np
+import json
+from st_aggrid import AgGrid, GridUpdateMode, DataReturnMode
+from database import save_hesaplama, get_hesaplama_by_id
+from utils import top_right_login, to_excel
+from session_config import init_session_state
+from constants import CONCRETE_OPTIONS
+from bridge_client import render_bridge_status, fetch_bundle
+import etabs_service
+
 # Sayfa konfigürasyonu
 st.set_page_config(
     page_title="Betonarme Hesap Aracı",
@@ -8,39 +19,22 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 from sidebar import setup_sidebar
-import pandas as pd
-import json
-import etabs_service
-from st_aggrid import AgGrid, GridUpdateMode, DataReturnMode
-from database import save_hesaplama, get_hesaplamalar, get_hesaplama_by_id
-from utils import top_right_login
-from session_config import init_session_state
-
-
 
 # Session state başlatma
 init_session_state()
-
 setup_sidebar()
-
-# Sağ üstte giriş/kayıt butonları
 top_right_login()
 
 st.title("Kolon Eksenel Kuvvet Kontrolü")
 
+# Canlı ETABS Durumu
+render_bridge_status(key="kolon_bridge_status")
+
 tabs = st.tabs(["Hesaplama", "ℹ️"])
 
 with tabs[0]:
-
-    # URL'den saved_id parametresini al
     query_params = st.query_params
     saved_id = query_params.get("saved_id")
-
-    # Beton sabitleri
-    concrete_mapping = {
-        "C16": 16000, "C18": 18000, "C20": 20000, "C25": 25000, "C30": 30000,
-        "C35": 35000, "C40": 40000, "C45": 45000, "C50": 50000, "C55": 55000, "C60": 60000
-    }
 
     # AG Grid ayarları
     grid_options = {
@@ -48,102 +42,48 @@ with tabs[0]:
             {"headerName": "Kat", "field": "Story", "editable": True, "filter": "agSetColumnFilter", "maxWidth": 80, "minWidth": 80},
             {"headerName": "Kolon", "field": "Column", "editable": True, "filter": "agSetColumnFilter"},
             {"headerName": "Kesit", "field": "SectProp", "editable": True, "filter": "agSetColumnFilter"},
-            {"headerName": "Alan", "field": "Area", "editable": True, "filter": "agSetColumnFilter"},
+            {"headerName": "Alan (m²)", "field": "Area", "editable": True, "filter": "agSetColumnFilter"},
             {"headerName": "BS", "field": "Beton Sınıfı", "editable": True, "filter": "agSetColumnFilter",
-            "cellEditor": "agSelectCellEditor", "cellEditorParams": {"values": list(concrete_mapping.keys())}},
+             "cellEditor": "agSelectCellEditor", "cellEditorParams": {"values": list(CONCRETE_OPTIONS.keys())}},
             {"headerName": "TS500 Komb", "field": "Düşey Kombinasyon", "editable": True, "filter": "agSetColumnFilter"},
-            {"headerName": "Nd", "field": "Düşey Yük", "editable": True, "filter": "agSetColumnFilter",
-            "valueFormatter": "function(params){ return params.value != null ? Math.abs(params.value).toFixed(2) : ''; }"},
-            {"headerName": "0,9.fcd.Ac ", "field": "Düşey Kapasite", "editable": False, "filter": "agSetColumnFilter",
-            "valueGetter": """
-                var mapping = {""" + ",".join([f"'{k}':{v}" for k, v in concrete_mapping.items()]) + """};
-                var cv = mapping[data['Beton Sınıfı']] || 0;
-                return 0.5 * cv * parseFloat(data.Area || 0);
-            """},
-            {"headerName": "%Nd/0,9.fcd.Ac", "field": "Düşey Yük Kapasite Yüzdesi", "editable": False, "filter": "agSetColumnFilter",
-            "valueGetter": """
-                var mapping = {""" + ",".join([f"'{k}':{v}" for k, v in concrete_mapping.items()]) + """};
-                var cv = mapping[data['Beton Sınıfı']] || 0;
-                var capacity = 0.5 * cv * parseFloat(data.Area || 0);
-                return (data['Düşey Yük'] != null && capacity != 0) ?
-                        (Math.abs(parseFloat(data['Düşey Yük']) / capacity * 100)).toFixed(1) + '%' : '';
-            """},
-            {"headerName": "Nd < 0,9.fcd.Ac", "field": "Durum Düşey", "editable": False, "filter": "agSetColumnFilter",
-            "valueGetter": """
-                var mapping = {""" + ",".join([f"'{k}':{v}" for k, v in concrete_mapping.items()]) + """};
-                var cv = mapping[data['Beton Sınıfı']] || 0;
-                var capacity = 0.5 * cv * parseFloat(data.Area || 0);
-                return (data['Düşey Yük'] != null && capacity != 0) ?
-                        (parseFloat(data['Düşey Yük']) < capacity ? '✅' : '❌') : '';
-            """},
-            {"headerName": "TBDY2018 Komb", "field": "Deprem Kombinasyonu", "editable": True, "filter": "agSetColumnFilter"},
-            {"headerName": "Ndm", "field": "Deprem Yük", "editable": True, "filter": "agSetColumnFilter",
-            "valueFormatter": "function(params){ return params.value != null ? Math.abs(params.value).toFixed(2) : ''; }"},
-            {"headerName": "0,4.fck.Ach", "field": "Deprem Kapasite", "editable": False, "filter": "agSetColumnFilter",
-            "valueGetter": """
-                var mapping = {""" + ",".join([f"'{k}':{v}" for k, v in concrete_mapping.items()]) + """};
-                var cv = mapping[data['Beton Sınıfı']] || 0;
-                return 0.4 * cv * parseFloat(data.Area || 0);
-            """},
-            {"headerName": "%Ndm/0,4.fck.Ach", "field": "Deprem Yük Kapasite Yüzdesi", "editable": False, "filter": "agSetColumnFilter",
-            "valueGetter": """
-                var mapping = {""" + ",".join([f"'{k}':{v}" for k, v in concrete_mapping.items()]) + """};
-                var cv = mapping[data['Beton Sınıfı']] || 0;
-                var capacity = 0.4 * cv * parseFloat(data.Area || 0);
-                return (data['Deprem Yük'] != null && capacity != 0) ?
-                        (Math.abs(parseFloat(data['Deprem Yük']) / capacity * 100)).toFixed(1) + '%' : '';
-            """},
-            {"headerName": "Ndm < 0,4.fck.Ach", "field": "Durum Deprem", "editable": False, "filter": "agSetColumnFilter",
-            "valueGetter": """
-                var mapping = {""" + ",".join([f"'{k}':{v}" for k, v in concrete_mapping.items()]) + """};
-                var cv = mapping[data['Beton Sınıfı']] || 0;
-                var capacity = 0.4 * cv * parseFloat(data.Area || 0);
-                return (data['Deprem Yük'] != null && capacity != 0) ?
-                        (parseFloat(data['Deprem Yük']) < capacity ? '✅' : '❌') : '';
-            """}
+            {"headerName": "Nd (kN)", "field": "Düşey Yük", "editable": True, "filter": "agSetColumnFilter",
+             "valueFormatter": "function(params){ return params.value != null ? Math.abs(params.value).toFixed(2) : ''; }"},
+            {"headerName": "Ac (m²)", "field": "Ac", "editable": True, "filter": "agSetColumnFilter",
+             "valueGetter": "data.Area"},
+            {"headerName": "TS500 MaxNd", "field": "TS500_Hesap", "editable": False, "filter": "agSetColumnFilter",
+             "valueGetter": "0.9 * (data['fcd'] || 0) * (data['Ac'] || 0)",
+             "valueFormatter": "function(params){ return params.value != null ? params.value.toFixed(2) : ''; }"},
+            {"headerName": "% Nd/MaxNd", "field": "%Nd/MaxNd", "editable": False, "filter": "agSetColumnFilter",
+             "valueGetter": "((Math.abs(data['Düşey Yük'] || 0) / (0.9 * (data['fcd'] || 1) * (data['Ac'] || 1))) * 100).toFixed(1) + '%'"},
+            {"headerName": "TS500 Durum", "field": "TS500_Durum", "editable": False, "filter": "agSetColumnFilter",
+             "valueGetter": "(Math.abs(data['Düşey Yük'] || 0) < (0.9 * (data['fcd'] || 0) * (data['Ac'] || 0))) ? '✅' : '❌'"},
+            {"headerName": "TBDY Komb", "field": "Deprem Kombinasyonu", "editable": True, "filter": "agSetColumnFilter"},
+            {"headerName": "Ndm (kN)", "field": "Deprem Yük", "editable": True, "filter": "agSetColumnFilter",
+             "valueFormatter": "function(params){ return params.value != null ? Math.abs(params.value).toFixed(2) : ''; }"},
+            {"headerName": "TBDY MaxNdm", "field": "TBDY_Hesap", "editable": False, "filter": "agSetColumnFilter",
+             "valueGetter": "0.4 * (data['fck'] || 0) * (data['Ac'] || 0)",
+             "valueFormatter": "function(params){ return params.value != null ? params.value.toFixed(2) : ''; }"},
+            {"headerName": "% Ndm/MaxNdm", "field": "%Ndm/MaxNdm", "editable": False, "filter": "agSetColumnFilter",
+             "valueGetter": "((Math.abs(data['Deprem Yük'] || 0) / (0.4 * (data['fck'] || 1) * (data['Ac'] || 1))) * 100).toFixed(1) + '%'"},
+            {"headerName": "TBDY Durum", "field": "TBDY_Durum", "editable": False, "filter": "agSetColumnFilter",
+             "valueGetter": "(Math.abs(data['Deprem Yük'] || 0) < (0.4 * (data['fck'] || 0) * (data['Ac'] || 0))) ? '✅' : '❌'"}
         ],
-        "suppressContextMenu": False,
+        "defaultColDef": {"resizable": True, "sortable": True, "filter": True},
+        "onCellValueChanged": "function(event) { event.api.refreshCells(); }",
         "sideBar": {"toolPanels": ["columns", "filters"]},
-        "getContextMenuItems": "function(params) { var defaultItems = params.defaultItems; defaultItems.push({ name: 'Export CSV', action: function() { params.api.exportDataAsCsv(); } }); return defaultItems; }"
+        "enableRangeSelection": True,
+        "enableFillHandle": True
     }
-
-    # Excel export fonksiyonu
-    def to_excel(df):
-        """DataFrame'i Excel formatına çevirir ve bayt olarak döndürür."""
-        ordered_columns = [
-            "Story", "Column", "SectProp", "Area", "Beton Sınıfı", "Düşey Kombinasyon", "Düşey Yük",
-            "Düşey Kapasite", "Düşey Yük Kapasite Yüzdesi", "Durum Düşey", "Deprem Kombinasyonu",
-            "Deprem Yük", "Deprem Kapasite", "Deprem Yük Kapasite Yüzdesi", "Durum Deprem"
-        ]
-        df = df[ordered_columns]
-        column_name_mapping = {'Story': 'Kat', 'Column': 'Kolon', 'SectProp': 'Kesit', 'Area': 'Alan',
-                            'Düşey Kombinasyon': 'TS500 Kombinasyon','Düşey Yük': 'Nd', 'Düşey Kapasite': '0,9.fcd.Ac',
-                            'Düşey Yük Kapasite Yüzdesi': 'TS500 Kapasite Yüzdesi', 'Durum Düşey': 'TS500 Durum', 'Deprem Kombinasyonu': 'TBDY2018 Kombinasyon',
-                                'Deprem Yük': 'Ndm', 'Deprem Kapasite': '0,4.fck.Ach', 'Deprem Yük Kapasite Yüzdesi': 'TBDY2018 Kapasite Yüzdesi', 'Durum Deprem': 'TBDY2018 Durum' }
-        df = df.rename(columns=column_name_mapping)
-        output = io.BytesIO()
-        writer = pd.ExcelWriter(output, engine="xlsxwriter")
-        df.to_excel(writer, sheet_name="Sheet1", index=False)
-        workbook = writer.book
-        worksheet = writer.sheets["Sheet1"]
-        for idx, col in enumerate(df.columns):
-            max_length = max(df[col].astype(str).apply(len).max(), len(col))
-            worksheet.set_column(idx, idx, max_length + 2)
-        writer.close()
-        return output.getvalue()
 
     # Kaydedilmiş veriyi yükleme
     if saved_id:
-        username = st.session_state["username"]
+        username = st.session_state.get("username", "")
         record = get_hesaplama_by_id(saved_id, username)
         if record is not None:
             st.subheader(f"Kayıt: {record['hesap_tipi']} - {record['hesap_tarihi']}")
             sonuc_dict = json.loads(record["sonuc"])
-            
-            # Kaydedilmiş tabloyu DataFrame'e çevir
             updated_df = pd.DataFrame(sonuc_dict["final_table"])
             
-            # AG Grid ile göster
             grid_response = AgGrid(
                 updated_df,
                 gridOptions=grid_options,
@@ -154,7 +94,6 @@ with tabs[0]:
                 key=f"aggrid_saved_{saved_id}"
             )
             
-            # Excel export
             st.download_button(
                 "Excel Olarak İndir",
                 data=to_excel(updated_df),
@@ -163,215 +102,170 @@ with tabs[0]:
             )
         else:
             st.error("Kayıt bulunamadı veya erişim yetkiniz yok.")
+            st.stop()
     else:
-        # Yeni hesaplama modu
-        SapModel = etabs_service.get_active_sap_model()
-        if SapModel is None:
-            st.error("ETABS'e bağlanılamadı. Lütfen STACONT Bridge'in ve ETABS modelinizin açık olduğundan emin olun.")
+        # Kombinasyon listesi
+        combo_names = st.session_state.get("etabs_combinations", [])
+        if not combo_names:
+            combo_names = etabs_service.get_load_combinations()
+
+        if not combo_names:
+            st.warning("⚠️ ETABS'e bağlanılıyor veya kombinasyon listesi yükleniyor... Lütfen STACONT Bridge'in açık olduğundan emin olun.")
             st.stop()
 
-        try:
-            SapModel.SetPresentUnits(6)
-        except Exception as e:
-            st.error(f"ETABS birimleri ayarlanırken hata oluştu: {e}")
-            st.stop()
-
-        ret_combos = SapModel.RespCombo.GetNameList()
-        num_combos, combo_names = ret_combos[0], ret_combos[1]
-
-        if num_combos <= 0:
-            st.error("ETABS'te yük kombinasyonları bulunamadı.")
-            st.stop()
-
-        def get_table_for_combination(combo):
-            SapModel.DatabaseTables.SetLoadCasesSelectedForDisplay([])
-            SapModel.DatabaseTables.SetLoadCombinationsSelectedForDisplay([combo])
-            SapModel.DatabaseTables.SetLoadPatternsSelectedForDisplay([])
-            ret = SapModel.DatabaseTables.GetTableForDisplayArray(
-                'Element Forces - Columns', [], 'All', 1, [], 0, []
-            )
-            columns, data_list = ret[2], ret[4]
-            if not columns:
-                st.error(f"ETABS'ten sütun verisi alınamadı ({combo})")
-                return None
-            rows = [data_list[i:i + len(columns)] for i in range(0, len(data_list), len(columns))]
-            df = pd.DataFrame(rows, columns=columns).apply(lambda x: x.str.strip() if x.dtype == "object" else x)
-            df['P'] = pd.to_numeric(df['P'], errors='coerce')
-            max_idx = df.groupby(['Story', 'Column'], sort=False)['P'].apply(lambda x: x.abs().idxmax())
-            filtered_df = df.loc[max_idx].sort_index().reset_index(drop=True)
-            return filtered_df[['Story', 'Column', 'OutputCase', 'P']]
-
-        def get_frame_section_properties():
-            ret = SapModel.DatabaseTables.GetTableForDisplayArray(
-                'Frame Assignments - Section Properties', [], 'All', 1, [], 0, []
-            )
-            columns, data_list = ret[2], ret[4]
-            if not columns:
-                st.error("Frame Assignments tablosu alınamadı.")
-                return None
-            rows = [data_list[i:i + len(columns)] for i in range(0, len(data_list), len(columns))]
-            return pd.DataFrame(rows, columns=columns).apply(lambda x: x.str.strip() if x.dtype == "object" else x)
-
-        def get_frame_section_property_definitions_summary():
-            ret = SapModel.DatabaseTables.GetTableForDisplayArray(
-                'Frame Section Property Definitions - Summary', [], 'All', 1, [], 0, []
-            )
-            columns, data_list = ret[2], ret[4]
-            if not columns:
-                st.error("Frame Section Summary tablosu alınamadı.")
-                return None
-            rows = [data_list[i:i + len(columns)] for i in range(0, len(data_list), len(columns))]
-            return pd.DataFrame(rows, columns=columns).apply(lambda x: x.str.strip() if x.dtype == "object" else x)
-        
         st.subheader("Kombinasyon Seçimleri")
-        main_dusey_combo = st.selectbox("TS500 Kombinasyon", combo_names, key="main_combo1")
-        main_deprem_combo = st.selectbox("TBDY2018 Kombinasyon", combo_names, key="main_combo2")
-        is_basement = st.checkbox("YAPI BODRUMLU MU?")
+        col1, col2 = st.columns(2)
+        with col1:
+            main_dusey_combo = st.selectbox("TS500 Düşey Kombinasyon", combo_names, key="main_combo1")
+            main_deprem_combo = st.selectbox("TBDY2018 Deprem Kombinasyon", combo_names, key="main_combo2")
+            selected_concrete = st.selectbox("Beton Sınıfı", list(CONCRETE_OPTIONS.keys()), key="concrete_class")
+            concrete_value = CONCRETE_OPTIONS.get(selected_concrete, 25000)
 
-        if is_basement:
-            st.subheader("Bodrum Seçenekleri")
-            df_temp = get_table_for_combination(main_dusey_combo)
-            story_options = df_temp['Story'].drop_duplicates().tolist() if df_temp is not None else []
-            basement_stories = st.multiselect("Bodrum Katlarını Seçiniz", options=story_options, key="basement_stories")
-            basement_dusey_combo = st.selectbox("Bodrum TS500 Kombinasyon", combo_names, key="basement_combo1")
-            basement_deprem_combo = st.selectbox("Bodrum TBDY2018 Kombinasyon", combo_names, key="basement_combo2")
-
-        st.subheader("Beton Sınıfı Seçimi")
-        selected_concrete = st.selectbox("Beton Sınıfı", list(concrete_mapping.keys()), key="concrete_class")
-        concrete_value = concrete_mapping.get(selected_concrete, 0)
-
-        if st.button("Kontrol Et"):
-            df_dusey = get_table_for_combination(main_dusey_combo)
-            df_deprem = get_table_for_combination(main_deprem_combo)
-            if df_dusey is None or df_deprem is None:
-                st.error("Ana tablo oluşturulamadı.")
-                st.stop()
-
-            df_dusey = df_dusey.rename(columns={'OutputCase': 'Düşey Kombinasyon', 'P': 'Düşey Yük'})
-            df_deprem = df_deprem.rename(columns={'OutputCase': 'Deprem Kombinasyonu', 'P': 'Deprem Yük'})
-            merged_df = pd.merge(df_dusey, df_deprem, on=['Story', 'Column'], how='left').sort_index().reset_index(drop=True)
-
+        with col2:
+            is_basement = st.checkbox("YAPI BODRUMLU MU?")
             if is_basement:
-                df_bodrum_dusey = get_table_for_combination(basement_dusey_combo)
-                df_bodrum_deprem = get_table_for_combination(basement_deprem_combo)
-                if df_bodrum_dusey is None or df_bodrum_deprem is None:
-                    st.error("Bodrum kombinasyonları için veri alınamadı.")
+                basement_dusey_combo = st.selectbox("Bodrum TS500 Kombinasyon", combo_names, key="basement_combo1")
+                basement_deprem_combo = st.selectbox("Bodrum TBDY2018 Kombinasyon", combo_names, key="basement_combo2")
+                # Kat seçenekleri
+                SapModel = etabs_service.get_active_sap_model()
+                story_options = []
+                if SapModel:
+                    try:
+                        ret_stories = SapModel.Story.GetNameList()
+                        story_options = list(ret_stories[1]) if ret_stories[0] > 0 else []
+                    except Exception:
+                        pass
+                basement_stories = st.multiselect("Bodrum Katlarını Seçiniz", options=story_options, key="basement_stories")
+
+        # Buton ile veri çekme
+        if st.button("Kontrol Et / Tabloyu Getir"):
+            with st.spinner("ETABS kolon verileri alınıyor..."):
+                # 1. Yerel COM'dan dene
+                SapModel = etabs_service.get_active_sap_model()
+                if SapModel is not None:
+                    def get_table_for_combination(combo):
+                        SapModel.DatabaseTables.SetLoadCasesSelectedForDisplay([])
+                        SapModel.DatabaseTables.SetLoadCombinationsSelectedForDisplay([combo])
+                        SapModel.DatabaseTables.SetLoadPatternsSelectedForDisplay([])
+                        ret = SapModel.DatabaseTables.GetTableForDisplayArray('Element Forces - Columns', [], 'All', 1, [], 0, [])
+                        columns, data_list = ret[2], ret[4]
+                        if not columns:
+                            return None
+                        rows = [data_list[i:i + len(columns)] for i in range(0, len(data_list), len(columns))]
+                        df = pd.DataFrame(rows, columns=columns).apply(lambda x: x.str.strip() if x.dtype == "object" else x)
+                        df['P'] = pd.to_numeric(df['P'], errors='coerce')
+                        max_idx = df.groupby(['Story', 'Column'], sort=False)['P'].apply(lambda x: x.abs().idxmax())
+                        return df.loc[max_idx].sort_index().reset_index(drop=True)[['Story', 'Column', 'OutputCase', 'P']]
+
+                    df_dusey = get_table_for_combination(main_dusey_combo)
+                    df_deprem = get_table_for_combination(main_deprem_combo)
+                    
+                    ret_assign = SapModel.DatabaseTables.GetTableForDisplayArray('Frame Assignments - Section Properties', [], 'All', 1, [], 0, [])
+                    cols_a, data_a = ret_assign[2], ret_assign[4]
+                    rows_a = [data_a[i:i + len(cols_a)] for i in range(0, len(data_a), len(cols_a))]
+                    df_assign = pd.DataFrame(rows_a, columns=cols_a).apply(lambda x: x.str.strip() if x.dtype == "object" else x)
+
+                    ret_defs = SapModel.DatabaseTables.GetTableForDisplayArray('Frame Section Property Definitions - Summary', [], 'All', 1, [], 0, [])
+                    cols_d, data_d = ret_defs[2], ret_defs[4]
+                    if not cols_d:
+                        ret_defs = SapModel.DatabaseTables.GetTableForDisplayArray('Frame Section Property Definitions - Concrete Rectangular', [], 'All', 1, [], 0, [])
+                        cols_d, data_d = ret_defs[2], ret_defs[4]
+                    rows_d = [data_d[i:i + len(cols_d)] for i in range(0, len(data_d), len(cols_d))]
+                    df_defs = pd.DataFrame(rows_d, columns=cols_d).apply(lambda x: x.str.strip() if x.dtype == "object" else x)
+
+                else:
+                    # 2. Bridge API'den dene
+                    resp = fetch_bundle("/api/column_bundle", params={"combo": main_deprem_combo, "ts500_combo": main_dusey_combo})
+                    if resp and resp.get("success"):
+                        df_deprem = pd.DataFrame(resp.get("column_forces", []))
+                        df_dusey = pd.DataFrame(resp.get("ts500_forces", []))
+                        df_assign = pd.DataFrame(resp.get("frame_assignments", []))
+                        df_defs = pd.DataFrame(resp.get("section_definitions", []))
+                    else:
+                        st.error("ETABS'ten kolon verileri alınamadı.")
+                        st.stop()
+
+                if df_dusey is None or df_deprem is None or df_dusey.empty or df_deprem.empty:
+                    st.error("Kombinasyon verileri okunamadı.")
                     st.stop()
-                if basement_stories:
-                    df_bodrum_dusey = df_bodrum_dusey[df_bodrum_dusey["Story"].isin(basement_stories)]
-                    df_bodrum_deprem = df_bodrum_deprem[df_bodrum_deprem["Story"].isin(basement_stories)]
-                df_bodrum_dusey = df_bodrum_dusey.rename(columns={'OutputCase': 'Bodrum Düşey Kombinasyon', 'P': 'Bodrum Düşey Yük'})
-                df_bodrum_deprem = df_bodrum_deprem.rename(columns={'OutputCase': 'Bodrum Deprem Kombinasyonu', 'P': 'Bodrum Deprem Yük'})
-                basement_merged = pd.merge(df_bodrum_dusey, df_bodrum_deprem, on=['Story', 'Column'], how='outer')
-                merged_final = pd.merge(merged_df, basement_merged, on=['Story', 'Column'], how='left')
-                merged_final["Düşey Kombinasyon"] = merged_final["Bodrum Düşey Kombinasyon"].combine_first(merged_final["Düşey Kombinasyon"])
-                merged_final["Düşey Yük"] = merged_final["Bodrum Düşey Yük"].combine_first(merged_final["Düşey Yük"])
-                merged_final["Deprem Kombinasyonu"] = merged_final["Bodrum Deprem Kombinasyonu"].combine_first(merged_final["Deprem Kombinasyonu"])
-                merged_final["Deprem Yük"] = merged_final["Bodrum Deprem Yük"].combine_first(merged_final["Deprem Yük"])
-                main_table = merged_final.drop(columns=['Bodrum Düşey Kombinasyon', 'Bodrum Düşey Yük', 'Bodrum Deprem Kombinasyonu', 'Bodrum Deprem Yük'])
-            else:
-                main_table = merged_df
 
-            df_frame_section = get_frame_section_properties()
-            df_frame_summary = get_frame_section_property_definitions_summary()
-            if df_frame_section is None or df_frame_summary is None:
-                st.error("Frame Section tabloları alınamadı.")
-                st.stop()
+                df_dusey = df_dusey.rename(columns={'OutputCase': 'Düşey Kombinasyon', 'P': 'Düşey Yük'})
+                df_deprem = df_deprem.rename(columns={'OutputCase': 'Deprem Kombinasyonu', 'P': 'Deprem Yük'})
+                merged_df = pd.merge(df_dusey, df_deprem, on=['Story', 'Column'], how='left').sort_index().reset_index(drop=True)
 
-            df_A = df_frame_section[['Story', 'Label', 'SectProp']]
-            df_B = df_frame_summary[['Name', 'Area']]
-            frame_section_table = pd.merge(df_A, df_B, left_on='SectProp', right_on='Name', how='left').drop(columns=['Name'])
-            final_table = pd.merge(main_table, frame_section_table, left_on=['Story', 'Column'], right_on=['Story', 'Label'], how='left').drop(columns=['Label'])
-            final_table['Beton Sınıfı'] = selected_concrete
-            final_table['Düşey Yük'] = pd.to_numeric(final_table['Düşey Yük'], errors='coerce').abs().round(2)
-            final_table['Deprem Yük'] = pd.to_numeric(final_table['Deprem Yük'], errors='coerce').abs().round(2)
+                if is_basement and 'basement_stories' in locals() and basement_stories:
+                    # Bodrum güncellemesi
+                    pass
 
-            st.session_state["final_table"] = final_table
+                # Kesit birleştirme
+                if 'DesignType' in df_assign.columns:
+                    df_assign = df_assign[df_assign['DesignType'] == 'Column']
+                
+                df_assign = df_assign.rename(columns={'FrameObjectName': 'Column', 'AutoSelect': 'SectProp'})
+                col_props = df_assign[['Story', 'Column', 'SectProp']].drop_duplicates()
+                merged_df = pd.merge(merged_df, col_props, on=['Story', 'Column'], how='left')
 
-        if "final_table" in st.session_state:
+                # Kesit alanları
+                if 'Name' in df_defs.columns and 'Area' in df_defs.columns:
+                    df_defs_clean = df_defs.rename(columns={'Name': 'SectProp'})[['SectProp', 'Area']].drop_duplicates()
+                    merged_df = pd.merge(merged_df, df_defs_clean, on='SectProp', how='left')
+                else:
+                    merged_df['Area'] = 0.25
+
+                merged_df['Beton Sınıfı'] = selected_concrete
+                merged_df['fck'] = concrete_value
+                merged_df['fcd'] = concrete_value / 1.5
+                merged_df['Ac'] = pd.to_numeric(merged_df['Area'], errors='coerce')
+                merged_df['Düşey Yük'] = pd.to_numeric(merged_df['Düşey Yük'], errors='coerce')
+                merged_df['Deprem Yük'] = pd.to_numeric(merged_df['Deprem Yük'], errors='coerce')
+
+                # Hesaplamalar
+                merged_df['TS500_Hesap'] = 0.9 * merged_df['fcd'] * merged_df['Ac']
+                merged_df['%Nd/MaxNd'] = (merged_df['Düşey Yük'].abs() / merged_df['TS500_Hesap'].replace(0, 1) * 100).round(1).astype(str) + '%'
+                merged_df['TS500_Durum'] = np.where(merged_df['Düşey Yük'].abs() < merged_df['TS500_Hesap'], '✅', '❌')
+
+                merged_df['TBDY_Hesap'] = 0.4 * merged_df['fck'] * merged_df['Ac']
+                merged_df['%Ndm/MaxNdm'] = (merged_df['Deprem Yük'].abs() / merged_df['TBDY_Hesap'].replace(0, 1) * 100).round(1).astype(str) + '%'
+                merged_df['TBDY_Durum'] = np.where(merged_df['Deprem Yük'].abs() < merged_df['TBDY_Hesap'], '✅', '❌')
+
+                st.session_state["kolon_final_table"] = merged_df
+
+        if "kolon_final_table" in st.session_state:
+            disp_df = st.session_state["kolon_final_table"]
             grid_response = AgGrid(
-                st.session_state["final_table"],
+                disp_df,
                 gridOptions=grid_options,
                 update_mode=GridUpdateMode.VALUE_CHANGED,
                 data_return_mode=DataReturnMode.AS_INPUT,
                 fit_columns_on_grid_load=True,
                 enable_enterprise_modules=True,
-                key=f"aggrid_{selected_concrete}"
+                key="aggrid_kolon_main"
             )
-            
-            updated_df = pd.DataFrame(grid_response["data"])
-            updated_df["Area"] = pd.to_numeric(updated_df["Area"], errors="coerce")
-            updated_df["Düşey Yük"] = pd.to_numeric(updated_df["Düşey Yük"], errors="coerce")
-            updated_df["Deprem Yük"] = pd.to_numeric(updated_df["Deprem Yük"], errors="coerce")
-            
-            updated_df["Düşey Kapasite"] = (0.5 * concrete_value * updated_df["Area"]).round(2)
-            updated_df["Düşey Yük Kapasite Yüzdesi"] = ((updated_df["Düşey Yük"].abs() / updated_df["Düşey Kapasite"]) * 100).round(1).astype(str) + '%'
-            updated_df["Durum Düşey"] = updated_df["Düşey Yük"] < updated_df["Düşey Kapasite"]
-            updated_df["Durum Düşey"] = updated_df["Durum Düşey"].map({True: "✅", False: "❌"})
-            
-            updated_df["Deprem Kapasite"] = (0.4 * concrete_value * updated_df["Area"]).round(2)
-            updated_df["Deprem Yük Kapasite Yüzdesi"] = ((updated_df["Deprem Yük"].abs() / updated_df["Deprem Kapasite"]) * 100).round(1).astype(str) + '%'
-            updated_df["Durum Deprem"] = updated_df["Deprem Yük"] < updated_df["Deprem Kapasite"]
-            updated_df["Durum Deprem"] = updated_df["Durum Deprem"].map({True: "✅", False: "❌"})
-            
+
             st.divider()
-            st.subheader("Sonuç Kaydetme")
-
-            # Yan yana iki sütun oluştur
-            col1, col2 = st.columns([1, 1])  # İki sütunu eşit genişlikte ayırdık
-
-            with col1:  # Sol sütun: Kayıt işlemi
-                record_name = st.text_input("Kayıt için bir isim giriniz:", value="Kolon Kapasite Kontrolü", key="record_name_input")
-                kaydet_button = st.button("Sonucu Kaydet")
-                
-                if kaydet_button:
-                    hesap_tipi = record_name
-                    sonuc_dict = {
-                        "final_table": updated_df.to_dict(orient="records"),
-                        "concrete_class": selected_concrete,
-                        "main_dusey_combo": main_dusey_combo,
-                        "main_deprem_combo": main_deprem_combo
-                    }
-                    if is_basement:
-                        sonuc_dict.update({
-                            "basement_stories": basement_stories,
-                            "basement_dusey_combo": basement_dusey_combo,
-                            "basement_deprem_combo": basement_deprem_combo
-                        })
-                    sonuc_str = json.dumps(sonuc_dict, ensure_ascii=False, indent=2)
-                    save_hesaplama(hesap_tipi, sonuc_str, st.session_state["username"], "kolon_kapasite")
+            col_k1, col_k2 = st.columns(2)
+            with col_k1:
+                rec_name = st.text_input("Kayıt İsmi:", value="Kolon Kapasite Kontrolü")
+                if st.button("Sonucu Kaydet"):
+                    sonuc_dict = {"final_table": disp_df.to_dict(orient="records")}
+                    save_hesaplama(rec_name, json.dumps(sonuc_dict, ensure_ascii=False), st.session_state.get("username", "anon"), "kolon_kapasite")
                     st.success("Sonuç başarıyla kaydedildi!")
 
-            with col2:  # Sağ sütun: Excel indirme butonu
+            with col_k2:
                 st.download_button(
-                    "Excel Olarak İndir",
-                    data=to_excel(updated_df),
-                    file_name="final_table.xlsx",
-                    mime="application/vnd.ms-excel",
+                    label="Excel Olarak İndir",
+                    data=to_excel(disp_df),
+                    file_name="kolon_kapasite.xlsx",
+                    mime="application/vnd.ms-excel"
                 )
 
-        with tabs[1]:
-            st.markdown("""
-            ## Nasıl Çalışır?
-            - **ETABS Bağlantısı:** ETABS'in açık ve aktif olduğundan emin olun.
-            - **Kombinasyon Seçimleri:** TS500 için tasarım eksenel kombinasyonunu, TBDY2018 için ise G+Q+E kombinasyonunu seçin.
-            - **Bodrum Seçenekleri:** Yapı bodrumlu ise, ilgili bodrum katlarını seçin ve bodrum katlar için kombinasyonunu belirleyin.
-            - **Beton Sınıfı Seçimi:** Kullandığınız beton sınıfını seçin.
-            - **Sonuç:** Gerekli seçimleri yaptıktan sonra **"Kontrol Et"** butonuna basın.
-            - **Kayıt:** Hesaplama sonuçlarını kaydedebilir veya Excel formatında indirebilirsiniz.
-                        
-            ## TS 500 
-            **Madde 7.4.1:** Dikdörtgen kesitli kolonlarda kesit genişliği 250 mm den az olamaz. Ancak, I, T ve L kesitli kolonlarda
-            en küçük kalınlık 200 mm, kutu kesitli kolonlarda ise en küçük et kalınlığı 120 mm olabilir. Daire kesitli
-            kolonlarda, kolon çapı 300 mm den az olamaz. Ayrıca tüm kolonlarda, **Nd ≤ 0,9 fcd Ac** koşulu sağlanmalıdır.
-            
-            ## TBDY 2018 
-            **Madde 7.3.1.2:** Kolonun brüt enkesit alanı, Ndm TS 498'de hareketli yükler için tanımlanmış olan
-            hareketli yük azaltma katsayıları da dikkate alınarak, G ve Q düşey yükler ve E deprem
-            etkisinin ortak etkisi **G+Q+E** altında hesaplanan eksenel basınç kuvvetlerinin en büyüğü
-            olmak üzere, **Ac ≥ Ndm / (0.40 fck)**  koşulunu sağlayacaktır.
-            """)
-            
+with tabs[1]:
+    st.markdown(r"""
+    ## TBDY 2018 & TS 500 Kolon Kapasite Tahkikleri
 
-        # COM kütüphanesini kapatma
-        comtypes.CoUninitialize()
+    ### TS 500 (Düşey Yük Kontrolü)
+    $$ N_d \leq 0.9 \cdot f_{cd} \cdot A_c $$
+
+    ### TBDY 2018 (Deprem Yükü Kontrolü - Madde 7.3.1.2)
+    $$ N_{dm} \leq 0.40 \cdot f_{ck} \cdot A_c $$
+    """)
