@@ -59,18 +59,18 @@ st.markdown("""
         color: #64748b;
         text-align: center;
         max-width: 900px;
-        margin: 0 auto 30px auto;
+        margin: 0 auto 20px auto;
         line-height: 1.5;
     }
     
     .etabs-file-info {
-        font-size: 14px;
-        color: #2563eb;
+        font-size: 15px;
+        color: #15803d;
         text-align: center;
         font-weight: 600;
-        background-color: #eff6ff;
-        border: 1px solid #bfdbfe;
-        padding: 8px 16px;
+        background-color: #f0fdf4;
+        border: 1px solid #bbf7d0;
+        padding: 10px 20px;
         border-radius: 8px;
         margin: 0 auto 25px auto;
         max-width: 800px;
@@ -86,9 +86,9 @@ st.markdown("""
         font-weight: 600;
         background-color: #fef3c7;
         border: 1px solid #fde68a;
-        padding: 8px 16px;
+        padding: 10px 20px;
         border-radius: 8px;
-        margin: 0 auto 25px auto;
+        margin: 0 auto 15px auto;
         max-width: 800px;
         display: flex;
         align-items: center;
@@ -202,19 +202,53 @@ st.markdown(f"""
     <div class='subtitle'>TBDY 2018 ve TS 500 uyumlu otomatik betonarme yapı elemanları analiz ve kontrol platformu</div>
 """, unsafe_allow_html=True)
 
-# ETABS dosya bilgisi gösterimi
+# ETABS dosya bilgisi ve indirme alanı
 if etabs_info["connected"]:
     st.markdown(f"""
         <div class='etabs-file-info'>
-            <span>🟢</span> <b>ETABS Bağlandı:</b> {etabs_info['model_name']} ({etabs_info['mode'].upper()} modu)
+            <span>🟢</span> <b>ETABS Bağlandı:</b> {etabs_info['model_name']} ({etabs_info['mode'].upper()} modu aktif)
         </div>
     """, unsafe_allow_html=True)
 else:
     st.markdown(f"""
         <div class='etabs-file-info-warn'>
-            <span>⚠️</span> <b>ETABS Bağlantısı Bekleniyor:</b> Web üzerinden otomatik analiz için yerel bilgisayarınızda <b>STACONT Bridge</b>'i çalıştırınız.
+            <span>⚠️</span> <b>ETABS Bağlantısı Bekleniyor:</b> Web üzerinden otomatik analiz için yerel bilgisayarınızda <b>STACONT Bridge</b>'i başlatınız.
         </div>
     """, unsafe_allow_html=True)
+
+    with st.expander("📥 STACONT Bridge'i İndir ve 3 Adımda Bağlan", expanded=False):
+        st.markdown("""
+        **Nasıl Bağlanılır?**
+        1. Aşağıdaki butondan **`bridge_agent.py`** veya **`STACONT_Bridge_Baslat.bat`** dosyasını indirin.
+        2. İndirdiğiniz dosyayı bilgisayarınızda ETABS açıkken çift tıklayarak çalıştırın.
+        3. Sayfayı yenileyin; yukarıdaki durum **🟢 ETABS Bağlandı** olarak güncellenecektir!
+        """)
+        
+        # Bridge dosyalarını okuma
+        bridge_py_path = os.path.join(os.path.dirname(__file__), "bridge_agent.py")
+        bridge_bat_path = os.path.join(os.path.dirname(__file__), "STACONT_Bridge_Baslat.bat")
+        
+        col_d1, col_d2 = st.columns(2)
+        with col_d1:
+            if os.path.exists(bridge_py_path):
+                with open(bridge_py_path, "r", encoding="utf-8") as f:
+                    st.download_button(
+                        label="📥 bridge_agent.py İndir",
+                        data=f.read(),
+                        file_name="bridge_agent.py",
+                        mime="text/x-python",
+                        use_container_width=True
+                    )
+        with col_d2:
+            if os.path.exists(bridge_bat_path):
+                with open(bridge_bat_path, "r", encoding="utf-8") as f:
+                    st.download_button(
+                        label="📥 Tek Tıkla Başlatıcı (.bat) İndir",
+                        data=f.read(),
+                        file_name="STACONT_Bridge_Baslat.bat",
+                        mime="application/x-bat",
+                        use_container_width=True
+                    )
 
 # Cards (First Row)
 col1, col2, col3 = st.columns([1, 1, 1], gap="medium")
