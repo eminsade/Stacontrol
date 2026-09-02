@@ -1,10 +1,10 @@
 """
 STACONT Bridge Agent
 --------------------
-Kullanıcının yerel bilgisayarında çalışan, açık ETABS oturumuna bağlanan
-ve web üzerindeki STACONT platformuna güvenli HTTPS tüneli üzerinden veri sunan köprü servisi.
+Kullanicinin yerel bilgisayarinda calisan, acik ETABS oturumuna baglanan
+ve web uzerindeki STACONT platformuna guvenli HTTPS tuneli uzerinden veri sunan kopru servisi.
 
-Çalıştırma: python bridge_agent.py
+Calistirma: python bridge_agent.py
 """
 
 import json
@@ -16,7 +16,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 import pandas as pd
 
-# Windows COM desteği
+# Windows COM destegi
 try:
     import comtypes.client
     import comtypes
@@ -24,7 +24,7 @@ try:
 except ImportError:
     COMTYPES_AVAILABLE = False
 
-# Cloudflare Tunnel desteği (Sıfır ayar ile bulut erişimi)
+# Cloudflare Tunnel destegi
 TUNNEL_URL = ""
 try:
     from pycloudflared import try_cloudflare
@@ -39,18 +39,18 @@ def start_tunnel_async():
     global TUNNEL_URL
     if CLOUDFLARED_AVAILABLE:
         try:
-            print("🌐 Güvenli Cloudflare HTTPS Tüneli başlatılıyor...")
+            print("[INFO] Cloudflare HTTPS Tuneli baslatiliyor...")
             t = try_cloudflare(port=PORT)
             if hasattr(t, 'tunnel') and t.tunnel:
                 TUNNEL_URL = t.tunnel
-                print(f"🔗 Genel Köprü Adresi: {TUNNEL_URL}")
+                print(f"[OK] Genel Kopru Adresi (Tunnel): {TUNNEL_URL}")
         except Exception as e:
-            print(f"Tünel başlatma uyarısı: {e}")
+            print(f"[WARN] Tunel uyarisi: {e}")
 
 def get_sap_model():
-    """Aktif ETABS SapModel nesnesine bağlanır."""
+    """Aktif ETABS SapModel nesnesine baglanir."""
     if not COMTYPES_AVAILABLE:
-        return None, "comtypes kütüphanesi yüklü değil."
+        return None, "comtypes kutuphanesi yuklu degil."
     try:
         comtypes.CoInitialize()
         etabs_object = comtypes.client.GetActiveObject("CSI.ETABS.API.ETABSObject")
@@ -58,10 +58,10 @@ def get_sap_model():
         SapModel.SetPresentUnits(6)  # kN-m
         return SapModel, None
     except Exception as e:
-        return None, f"ETABS bağlantı hatası: {str(e)}"
+        return None, f"ETABS baglanti hatasi: {str(e)}"
 
 def get_table_df(SapModel, table_name, group="All", combo=None, case=None):
-    """ETABS DatabaseTables üzerinden tabloyu pandas DataFrame olarak çeker."""
+    """ETABS DatabaseTables uzerinden tabloyu pandas DataFrame olarak ceker."""
     try:
         if combo:
             SapModel.DatabaseTables.SetLoadCasesSelectedForDisplay([])
@@ -85,7 +85,7 @@ def get_table_df(SapModel, table_name, group="All", combo=None, case=None):
         rows = [raw_data[i:i + num_cols] for i in range(0, len(raw_data), num_cols)]
         return pd.DataFrame(rows, columns=cols).apply(lambda x: x.str.strip() if x.dtype == "object" else x)
     except Exception as e:
-        print(f"Tablo çekme hatası ({table_name}): {e}")
+        print(f"[WARN] Tablo cekme hatasi ({table_name}): {e}")
         return pd.DataFrame()
 
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
@@ -112,20 +112,20 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(response_bytes)
         except Exception as e:
-            print(f"Yanıt gönderme hatası: {e}")
+            print(f"[ERROR] Yanit gonderme hatasi: {e}")
 
     def do_GET(self):
         parsed_url = urllib.parse.urlparse(self.path)
         path = parsed_url.path
         query_params = urllib.parse.parse_qs(parsed_url.query)
 
-        # 1. Health / Status Kontrolü
+        # 1. Health / Status Kontrolu
         if path in ["/", "/health", "/status", "/api/status"]:
             SapModel, err = get_sap_model()
             if SapModel is not None:
                 try:
                     file_path = SapModel.GetModelFilename()
-                    file_name = os.path.basename(file_path) if file_path else "Kaydedilmemiş Model"
+                    file_name = os.path.basename(file_path) if file_path else "Kaydedilmemis Model"
                     self._send_json({
                         "status": "ok",
                         "etabs_connected": True,
@@ -146,30 +146,30 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                     "status": "disconnected",
                     "etabs_connected": False,
                     "tunnel_url": TUNNEL_URL,
-                    "error": err or "ETABS açık değil."
+                    "error": err or "ETABS acik degil."
                 })
             return
 
-        # ETABS bağlantısını al
+        # ETABS baglantisini al
         SapModel, err = get_sap_model()
         if SapModel is None:
-            self._send_json({"success": False, "error": err or "ETABS'e bağlanılamadı."}, status_code=503)
+            self._send_json({"success": False, "error": err or "ETABS baglanilamadi."}, status_code=503)
             return
 
         try:
-            # 2. Yük Kombinasyonları
+            # 2. Yuk Kombinasyonlari
             if path == "/api/combinations":
                 ret_combos = SapModel.RespCombo.GetNameList()
                 combos = list(ret_combos[1]) if ret_combos[0] > 0 else []
                 self._send_json({"success": True, "combinations": combos})
 
-            # 3. Yük Durumları (Load Cases)
+            # 3. Yuk Durumlari (Load Cases)
             elif path == "/api/load_cases":
                 ret_cases = SapModel.LoadCases.GetNameList()
                 cases = list(ret_cases[1]) if ret_cases[0] > 0 else []
                 self._send_json({"success": True, "load_cases": cases})
 
-            # 4. Kat İsimleri (Stories)
+            # 4. Kat Isimleri (Stories)
             elif path == "/api/stories":
                 ret_stories = SapModel.Story.GetNameList()
                 stories = list(ret_stories[1]) if ret_stories[0] > 0 else []
@@ -242,28 +242,28 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                 self._send_json({"success": True, "data": df.to_dict(orient="records"), "columns": list(df.columns)})
 
             else:
-                self._send_json({"error": "Endpoint bulunamadı.", "path": path}, status_code=404)
+                self._send_json({"error": "Endpoint bulunamadi.", "path": path}, status_code=404)
 
         except Exception as e:
-            self._send_json({"success": False, "error": f"İşlem hatası: {str(e)}"}, status_code=500)
+            self._send_json({"success": False, "error": f"Islem hatasi: {str(e)}"}, status_code=500)
 
 def run_server():
     server_address = (HOST, PORT)
     httpd = ThreadingHTTPServer(server_address, BridgeRequestHandler)
     print("=" * 60)
-    print(f"🚀 STACONT Bridge Agent Başlatıldı!")
-    print(f"📍 Adres: http://{HOST}:{PORT}")
-    print(f"💡 STACONT web arayüzü açıkken bu pencereyi açık tutun.")
+    print("STACONT Bridge Agent Baslatildi!")
+    print(f"Adres: http://{HOST}:{PORT}")
+    print("STACONT web arayuzu acikken bu pencereyi acik tutun.")
     print("=" * 60)
     
-    # Arka planda Cloudflare HTTPS tüneli aç
+    # Arka planda Cloudflare HTTPS tuneli baslat
     t_thread = threading.Thread(target=start_tunnel_async, daemon=True)
     t_thread.start()
 
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        print("\n🛑 STACONT Bridge durduruluyor...")
+        print("\nSTACONT Bridge durduruluyor...")
         httpd.server_close()
 
 if __name__ == "__main__":
