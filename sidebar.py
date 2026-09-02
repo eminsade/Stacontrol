@@ -20,16 +20,14 @@ def setup_sidebar():
         # ETABS Canlı Bağlantı Durumu
         st.markdown("---")
         st.markdown("### ETABS Durumu")
-        status = check_etabs_status()
-        if status["connected"]:
-            st.success(f"🟢 **Bağlı ({status['mode'].upper()})**\n\n📁 {status['model_name']}")
+        if st.session_state.get("etabs_connected"):
+            st.success(f"🟢 **Bağlandı**\n\n📁 {st.session_state.get('etabs_model_name', 'Aktif Model')}")
         else:
-            st.warning("🔴 **ETABS Bağlantısı Yok**")
-            with st.expander("❓ Nasıl Bağlanılır?"):
-                st.caption(
-                    "Web üzerinden ETABS'e bağlanmak için yerel bilgisayarınızda **STACONT Bridge** "
-                    "aracını çalıştırınız (`http://127.0.0.1:8765`)."
-                )
+            status = check_etabs_status()
+            if status.get("connected"):
+                st.success(f"🟢 **Bağlandı ({status['mode'].upper()})**\n\n📁 {status['model_name']}")
+            else:
+                st.warning("🔴 **ETABS Bağlantısı Yok**")
 
         # Kullanıcı işlemleri
         st.markdown("---")
@@ -40,12 +38,15 @@ def setup_sidebar():
                 st.session_state.pop("username", None)
                 cookies = st.session_state.get("cookies")
                 if cookies:
-                    cookies["logged_in"] = "False"
-                    cookies.pop("username", None)
-                    cookies.save()
+                    try:
+                        cookies["logged_in"] = "False"
+                        cookies.pop("username", None)
+                        cookies.save()
+                    except Exception:
+                        pass
                 st.success("Çıkış yapıldı!")
-                st.switch_page("pages/üyelik_girisi.py")
+                st.switch_page("pages/uyelik_girisi.py")
         else:
             st.info("Lütfen giriş yapın.")
-            st.page_link("pages/üyelik_girisi.py", label="Giriş Yap", icon="🔑")
+            st.page_link("pages/uyelik_girisi.py", label="Giriş Yap", icon="🔑")
             st.page_link("pages/kayit_ol.py", label="Kayıt Ol", icon="✍️")

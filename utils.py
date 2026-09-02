@@ -5,7 +5,7 @@ import hashlib
 import pandas as pd
 from session_config import init_session_state
 
-# Modern Streamlit uyumluluk yaması (eski kütüphanelerin st.cache hatasını önler)
+# Modern Streamlit uyumluluk yaması
 if not hasattr(st, "cache"):
     st.cache = st.cache_resource
 
@@ -16,9 +16,6 @@ try:
         prefix="my_app/",
         password=os.environ.get("COOKIES_PASSWORD", "MySecretPassword123!"),
     )
-    if not cookies.ready():
-        # Çerez hazır değilse sayfayı dondurmak yerine session_state ile devam et
-        pass
 except Exception:
     class DummyCookies(dict):
         def ready(self):
@@ -53,7 +50,7 @@ def top_right_login():
     Sayfanın sağ üst köşesinde Giriş Yap / Kayıt Ol butonlarını
     veya giriş yapıldıysa 'Hoşgeldiniz' butonu ve 'Çıkış Yap' butonunu yan yana gösterir.
     """
-    col1, col2 = st.columns([8, 2])
+    col1, col2 = st.columns([7.5, 2.5])
     
     with col2:
         try:
@@ -66,17 +63,15 @@ def top_right_login():
 
         if st.session_state.get("logged_in", False):
             welcome_col, logout_col = st.columns([1.5, 1])
-            
             with welcome_col:
                 st.markdown(
-                    f'<div style="background-color:#4CAF50; color:white; padding:8px 16px; '
-                    f'border-radius:5px; text-align:center; font-size:14px; margin:2px 0;">'
-                    f'Hoşgeldiniz, {st.session_state["username"]}</div>',
+                    f'<div style="background-color:#4CAF50; color:white; padding:6px 12px; '
+                    f'border-radius:6px; text-align:center; font-size:13px; font-weight:600; margin-top:3px;">'
+                    f'👤 {st.session_state["username"]}</div>',
                     unsafe_allow_html=True
                 )
-            
             with logout_col:
-                if st.button("Çıkış Yap", type="primary", use_container_width=True):
+                if st.button("Çıkış", type="secondary", use_container_width=True):
                     st.session_state.clear()
                     try:
                         cookies["logged_in"] = "False"
@@ -85,24 +80,9 @@ def top_right_login():
                     except Exception:
                         pass
                     st.rerun()
-
         else:
             login_col, register_col = st.columns([1, 1])
-            
             with login_col:
-                st.markdown(
-                    '<a href="/üyelik_girisi" target="_self" style="text-decoration:none; display:block;">'
-                    '<button style="background-color:#4CAF50; color:white; border:none; padding:8px 16px; '
-                    'width:100%; border-radius:5px; cursor:pointer; font-size:14px;">'
-                    'Giriş Yap</button></a>',
-                    unsafe_allow_html=True
-                )
-            
+                st.page_link("pages/uyelik_girisi.py", label="Giriş Yap", icon="🔑", use_container_width=True)
             with register_col:
-                st.markdown(
-                    '<a href="/kayit_ol" target="_self" style="text-decoration:none; display:block;">'
-                    '<button style="background-color:#008CBA; color:white; border:none; padding:8px 16px; '
-                    'width:100%; border-radius:5px; cursor:pointer; font-size:14px;">'
-                    'Kayıt Ol</button></a>',
-                    unsafe_allow_html=True
-                )
+                st.page_link("pages/kayit_ol.py", label="Kayıt Ol", icon="✍️", use_container_width=True)

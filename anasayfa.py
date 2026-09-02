@@ -18,10 +18,7 @@ from bridge_client import render_bridge_status
 
 # Initialize session state
 init_session_state()
-
 setup_sidebar()
-
-# Right-top login/register buttons
 top_right_login()
 
 # Enhanced CSS styles for a professional look
@@ -60,67 +57,31 @@ st.markdown("""
         line-height: 1.5;
     }
 
-    .card {
-        padding: 20px;
-        border-radius: 12px;
-        background: #ffffff;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-        margin-bottom: 25px;
+    .card-content {
+        padding: 10px 5px 15px 5px;
         text-align: center;
-        width: 100%;
-        height: 230px;
-        margin-left: auto;
-        margin-right: auto;
-        transition: transform 0.3s ease, box-shadow 0.3s ease;
+        height: 155px;
         display: flex;
         flex-direction: column;
-        justify-content: space-between;
-    }
-    .card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
+        justify-content: flex-start;
     }
     .card-title {
-        font-size: 20px;
+        font-size: 19px;
         font-weight: 700;
-        margin-bottom: 8px;
+        margin-top: 8px;
+        margin-bottom: 6px;
         color: #1e293b;
     }
     .card-text {
         color: #64748b;
-        font-size: 14px;
+        font-size: 13.5px;
         line-height: 1.4;
-        margin-bottom: 15px;
         flex-grow: 1;
     }
     .icon {
-        font-size: 32px;
-        margin-bottom: 10px;
+        font-size: 36px;
+        margin-bottom: 5px;
         color: #3b82f6;
-        transition: transform 0.3s ease;
-    }
-    .card:hover .icon {
-        transform: scale(1.15);
-    }
-
-    .analiz-button {
-        background: linear-gradient(90deg, #3b82f6 0%, #60a5fa 100%);
-        color: white !important;
-        padding: 8px 20px;
-        border-radius: 6px;
-        border: none;
-        text-decoration: none;
-        font-size: 14px;
-        font-weight: 600;
-        display: block;
-        transition: background 0.3s ease, transform 0.2s ease;
-        width: 150px;
-        margin: 0 auto;
-        text-align: center;
-    }
-    .analiz-button:hover {
-        background: linear-gradient(90deg, #2563eb 0%, #3b82f6 100%);
-        transform: translateY(-2px);
     }
 
     .footer {
@@ -166,7 +127,7 @@ st.markdown(f"""
     <div class='subtitle'>TBDY 2018 ve TS 500 uyumlu otomatik betonarme yapı elemanları analiz ve kontrol platformu</div>
 """, unsafe_allow_html=True)
 
-# Canlı ETABS Bağlantı Durumu (Kullanıcı Tarayıcısından Sorgulanır)
+# Canlı ETABS Bağlantı Durumu (Kullanıcı Tarayıcısından Doğrudan Sorgulanır)
 bridge_status = render_bridge_status()
 
 # İndirme Kılavuzu
@@ -208,85 +169,79 @@ if not st.session_state.get("etabs_connected", False):
 col1, col2, col3 = st.columns([1, 1, 1], gap="medium")
 
 with col1:
-    icon_html = f'<img src="{img_goreli}" style="width: 50px; height: 50px; margin-bottom: 5px;" class="icon">' if img_goreli else '<div class="icon">📏</div>'
-    st.markdown(f"""
-        <div class="card">
-            <div>
-                {icon_html}
+    with st.container(border=True):
+        icon_html = f'<img src="{img_goreli}" style="width: 48px; height: 48px;" class="icon">' if img_goreli else '<div class="icon">📏</div>'
+        st.markdown(f"""
+            <div class="card-content">
+                <div>{icon_html}</div>
                 <div class="card-title">Göreli Kat Ötelemesi</div>
                 <div class="card-text">TBDY 2018 Bölüm 4.9.1 uyarınca X ve Y yönü göreli kat ötelemesi ve grafik tahkiki.</div>
             </div>
-            <a href="/1_goreli_kat_otelemesi" target="_self" class="analiz-button">Analiz Yap</a>
-        </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
+        st.page_link("pages/1_goreli_kat_otelemesi.py", label="Analiz Yap", icon="🚀", use_container_width=True)
 
 with col2:
-    icon_html = f'<img src="{img_kolon}" style="width: 50px; height: 50px; margin-bottom: 5px;" class="icon">' if img_kolon else '<div class="icon">🏢</div>'
-    st.markdown(f"""
-        <div class="card">
-            <div>
-                {icon_html}
+    with st.container(border=True):
+        icon_html = f'<img src="{img_kolon}" style="width: 48px; height: 48px;" class="icon">' if img_kolon else '<div class="icon">🏢</div>'
+        st.markdown(f"""
+            <div class="card-content">
+                <div>{icon_html}</div>
                 <div class="card-title">Kolon Eksenel</div>
                 <div class="card-text">TS 500 ve TBDY 2018 kolon eksenel kuvvet ve kapasite kontrolü.</div>
             </div>
-            <a href="/2_kolon_kapasite" target="_self" class="analiz-button">Analiz Yap</a>
-        </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
+        st.page_link("pages/2_kolon_kapasite.py", label="Analiz Yap", icon="🚀", use_container_width=True)
 
 with col3:
-    icon_html = f'<img src="{img_perde_kap}" style="width: 50px; height: 50px; margin-bottom: 5px;" class="icon">' if img_perde_kap else '<div class="icon">🛡️</div>'
-    st.markdown(f"""
-        <div class="card">
-            <div>
-                {icon_html}
+    with st.container(border=True):
+        icon_html = f'<img src="{img_perde_kap}" style="width: 48px; height: 48px;" class="icon">' if img_perde_kap else '<div class="icon">🛡️</div>'
+        st.markdown(f"""
+            <div class="card-content">
+                <div>{icon_html}</div>
                 <div class="card-title">Perde Eksenel</div>
                 <div class="card-text">Perde eksenel basınç gerilmesi ve taşıma gücü sınır kontrolleri.</div>
             </div>
-            <a href="/4_perde_kapasite" target="_self" class="analiz-button">Analiz Yap</a>
-        </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
+        st.page_link("pages/4_perde_kapasite.py", label="Analiz Yap", icon="🚀", use_container_width=True)
 
 # Cards (Second Row)
 col4, col5, col6 = st.columns([1, 1, 1], gap="medium")
 
 with col4:
-    icon_html = f'<img src="{img_perde_kes}" style="width: 50px; height: 50px; margin-bottom: 5px;" class="icon">' if img_perde_kes else '<div class="icon">✂️</div>'
-    st.markdown(f"""
-        <div class="card">
-            <div>
-                {icon_html}
+    with st.container(border=True):
+        icon_html = f'<img src="{img_perde_kes}" style="width: 48px; height: 48px;" class="icon">' if img_perde_kes else '<div class="icon">✂️</div>'
+        st.markdown(f"""
+            <div class="card-content">
+                <div>{icon_html}</div>
                 <div class="card-title">Perde Kesme</div>
                 <div class="card-text">Dinamik kesme büyütmesi (Denk 7.16), gövde ezilme ve donatı kesme tahkiki.</div>
             </div>
-            <a href="/5_perde_kesme" target="_self" class="analiz-button">Analiz Yap</a>
-        </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
+        st.page_link("pages/5_perde_kesme.py", label="Analiz Yap", icon="🚀", use_container_width=True)
 
 with col5:
-    icon_html = f'<img src="{img_kiris_kes}" style="width: 50px; height: 50px; margin-bottom: 5px;" class="icon">' if img_kiris_kes else '<div class="icon">🔧</div>'
-    st.markdown(f"""
-        <div class="card">
-            <div>
-                {icon_html}
+    with st.container(border=True):
+        icon_html = f'<img src="{img_kiris_kes}" style="width: 48px; height: 48px;" class="icon">' if img_kiris_kes else '<div class="icon">🔧</div>'
+        st.markdown(f"""
+            <div class="card-content">
+                <div>{icon_html}</div>
                 <div class="card-title">Kiriş Kesme</div>
                 <div class="card-text">TBDY 2018 kiriş enine donatı ve kesme güvenliği tahkikleri.</div>
             </div>
-            <a href="/6_kiris_kesme" target="_self" class="analiz-button">Analiz Yap</a>
-        </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
+        st.page_link("pages/6_kiris_kesme.py", label="Analiz Yap", icon="🚀", use_container_width=True)
 
 with col6:
-    icon_html = f'<img src="{img_metraj}" style="width: 50px; height: 50px; margin-bottom: 5px;" class="icon">' if img_metraj else '<div class="icon">📐</div>'
-    st.markdown(f"""
-        <div class="card">
-            <div>
-                {icon_html}
+    with st.container(border=True):
+        icon_html = f'<img src="{img_metraj}" style="width: 48px; height: 48px;" class="icon">' if img_metraj else '<div class="icon">📐</div>'
+        st.markdown(f"""
+            <div class="card-content">
+                <div>{icon_html}</div>
                 <div class="card-title">Metraj & 3D Model</div>
                 <div class="card-text">Kat ve eleman bazında beton, kalıp, donatı metrajı ve interaktif 3D model.</div>
             </div>
-            <a href="/metraj_hesaplama" target="_self" class="analiz-button">Analiz Yap</a>
-        </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
+        st.page_link("pages/metraj_hesaplama.py", label="Analiz Yap", icon="🚀", use_container_width=True)
 
 # Footer
 st.markdown("""
