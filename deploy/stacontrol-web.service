@@ -1,0 +1,28 @@
+# Streamlit web uygulamasi
+[Unit]
+Description=Stacontrol Streamlit Web
+After=network-online.target stacontrol-bridge.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=stacontrol
+Group=stacontrol
+WorkingDirectory=/opt/stacontrol
+EnvironmentFile=/etc/stacontrol/stacontrol.env
+
+ExecStart=/opt/stacontrol/.venv/bin/streamlit run anasayfa.py \
+    --server.port 8501 --server.address 127.0.0.1
+
+Restart=always
+RestartSec=3
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/stacontrol
+StateDirectory=stacontrol
+
+[Install]
+WantedBy=multi-user.target

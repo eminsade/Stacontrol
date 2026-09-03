@@ -1,0 +1,31 @@
+# Stacontrol - Streamlit yapilandirmasi
+#
+# Gizli anahtarlar buraya YAZILMAZ; ortam degiskeniyle verilir (bkz. .env.example).
+
+[server]
+# static/ klasorundeki dosyalari /app/static/<ad> altinda yayinlar.
+# Ajan zip dosyasi buradan indirilir.
+enableStaticServing = true
+
+headless = true
+address = "0.0.0.0"
+port = 8501
+
+# Ters vekil sunucu (nginx) arkasinda calisirken gereklidir.
+enableCORS = false
+enableXsrfProtection = true
+
+# Bu uygulamada dosya yuklemesi yok; siniri dusuk tutmak saldiri yuzeyini azaltir.
+maxUploadSize = 5
+
+[browser]
+gatherUsageStats = false
+
+[client]
+# Uretimde hata ayrintilari son kullaniciya gosterilmez.
+showErrorDetails = "none"
+toolbarMode = "minimal"
+
+[theme]
+base = "light"
+primaryColor = "#4CAF50"

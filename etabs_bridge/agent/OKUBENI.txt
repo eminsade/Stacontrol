@@ -1,0 +1,50 @@
+STACONTROL - ETABS AJANI
+========================
+
+NE ISE YARAR
+------------
+Stacontrol web sitesinin, bilgisayarinizda ACIK olan ETABS modelinden
+tablo okuyabilmesini saglar. Hesaplamalar sitede yapilir; bu program
+sadece ETABS'ten veri okuyup siteye iletir.
+
+KURULUM
+-------
+Kurulum yoktur. Klasoru istediginiz yere cikarin ve "BASLAT.bat"
+dosyasina cift tiklayin.
+
+KULLANIM
+--------
+1. ETABS'i acin ve modelinizi yukleyin, analizi calistirin.
+2. BASLAT.bat dosyasina cift tiklayin. Siyah bir pencere acilir ve
+   size 6 haneli bir ESLESTIRME KODU verir.
+3. Sitede "ETABS Baglantisi" sayfasini acip bu kodu girin.
+4. Bagli yazisini gorunce hesap sayfalarini kullanabilirsiniz.
+5. Isiniz bitene kadar siyah pencereyi KAPATMAYIN.
+
+GUVENLIK
+--------
+* Program yalnizca DISARI dogru baglanti kurar. Bilgisayarinizda
+  hicbir port acilmaz, disaridan size baglanti kurulamaz.
+* Yapabilecegi islemler sabit bir listeyle sinirlidir: yuk
+  kombinasyonu adlarini okumak, rapor birimini ayarlamak ve
+  ETABS tablolarini okumak. Baska hicbir sey yapamaz.
+* Modelinizde DEGISIKLIK YAPMAZ; dosyalarinizi okumaz.
+* Okunan tablolar islendikten sonra sunucuda saklanmaz.
+
+SORUN GIDERME
+-------------
+"Acik bir ETABS bulunamadi"
+    ETABS'i acip modeli yukleyin. ETABS'i yonetici olarak
+    calistirdiysaniz ajani da yonetici olarak calistirin
+    (sag tik > Yonetici olarak calistir).
+
+"Sunucuya baglanilamadi"
+    Internet baglantinizi kontrol edin. Kurumsal aginizda vekil
+    sunucu (proxy) varsa BT biriminize agent_config.json icindeki
+    adrese erisim izni verdirin.
+
+"Tablo bos dondu"
+    ETABS'te analizi calistirdiginizdan emin olun.
+
+Kod suresi doldu
+    Ajani kapatip yeniden baslatin, yeni kod uretilir.

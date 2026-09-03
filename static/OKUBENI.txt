@@ -1,0 +1,13 @@
+Bu klasor, siteden indirilebilen statik dosyalari icerir.
+
+Ajan paketini uretmek icin:
+
+    python -m etabs_bridge.tools.build_agent --bridge-url https://SITENIZ/bridge
+
+Uretilen dist/StacontrolAgent-<surum>.zip dosyasini buraya
+"StacontrolAgent.zip" adiyla kopyalayin. Indirme adresi:
+
+    https://SITENIZ/app/static/StacontrolAgent.zip
+
+Buyuk dosyayi nginx ile servis etmek daha verimlidir; o durumda
+AGENT_DOWNLOAD_URL ortam degiskenini kendi adresinizle ayarlayin.

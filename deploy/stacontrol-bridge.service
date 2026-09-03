@@ -1,0 +1,36 @@
+# Kopru API'si: ajan <-> web is kuyrugu
+# Kurulum:  sudo cp deploy/*.service /etc/systemd/system/
+#           sudo systemctl daemon-reload
+#           sudo systemctl enable --now stacontrol-bridge
+[Unit]
+Description=Stacontrol ETABS Bridge API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=stacontrol
+Group=stacontrol
+WorkingDirectory=/opt/stacontrol
+EnvironmentFile=/etc/stacontrol/stacontrol.env
+
+# ONEMLI: tek isci (worker) ile calistirin.
+# Surec ici uyandirma olaylari surecler arasi paylasilmaz; birden fazla isci
+# ile sistem yine dogru calisir ama her istekte 0.25 sn'ye kadar ek gecikme
+# olusur. Tek isci binlerce ajani rahatlikla tasir (istekler G/C agirlikli).
+ExecStart=/opt/stacontrol/.venv/bin/uvicorn etabs_bridge.server.app:app \
+    --host 127.0.0.1 --port 8500 --workers 1 --timeout-keep-alive 75
+
+Restart=always
+RestartSec=3
+
+# Guvenlik siniralamalari
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/stacontrol
+StateDirectory=stacontrol
+
+[Install]
+WantedBy=multi-user.target

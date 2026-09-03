@@ -7,11 +7,13 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 from sidebar import setup_sidebar
-from utils import hash_password, cookies
-from database import verify_user
+# Gerekli fonksiyonları içe aktarıyoruz
+from utils import cookies
+from database import verify_user, normalize_username
 from session_config import init_session_state
 
 init_session_state()
+
 setup_sidebar()
 
 st.title("Üyelik Girişi")
@@ -19,7 +21,7 @@ st.title("Üyelik Girişi")
 # Eğer kullanıcı zaten giriş yaptıysa anasayfaya yönlendir
 if st.session_state.get("logged_in", False):
     st.info("Giriş Yapıldı!")
-    st.switch_page("anasayfa.py")
+    st.switch_page("anasayfa.py")  # Anasayfaya yönlendirme
 else:
     with st.form("login_form"):
         username = st.text_input("Kullanıcı Adı")
@@ -28,20 +30,20 @@ else:
         
         if submitted:
             if username and password:
-                hashed_password = hash_password(password)
-                if verify_user(username, hashed_password):
+                # Şifre düz metin doğrulanır; karşılaştırma bcrypt ile
+                # database.verify_user içinde yapılır.
+                if verify_user(username, password):
+                    username = normalize_username(username)
                     st.session_state["logged_in"] = True
                     st.session_state["username"] = username
 
-                    try:
-                        cookies["logged_in"] = "True"
-                        cookies["username"] = username
-                        cookies.save()
-                    except Exception:
-                        pass
+                    # Çerezlere kaydet
+                    cookies["logged_in"] = "True"
+                    cookies["username"] = username
+                    cookies.save()
 
                     st.success(f"Hoşgeldiniz, {username}!")
-                    st.switch_page("anasayfa.py")
+                    st.switch_page("anasayfa.py")  # Anasayfaya yönlendirme
                 else:
                     st.error("Geçersiz kullanıcı adı veya şifre")
             else:

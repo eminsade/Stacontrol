@@ -1,15 +1,6 @@
 import io
 import streamlit as st
 import json
-import numpy as np
-import pandas as pd
-from st_aggrid import AgGrid, GridUpdateMode, DataReturnMode
-from database import save_hesaplama, get_hesaplamalar, get_hesaplama_by_id
-from utils import top_right_login, to_excel
-from session_config import init_session_state
-from constants import CONCRETE_OPTIONS
-from bridge_client import render_bridge_status
-import etabs_service
 
 st.set_page_config(
     page_title="Betonarme Hesap Aracı",
@@ -18,65 +9,119 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 from sidebar import setup_sidebar
+from etabs_bridge.streamlit_ui import connect_etabs
+
+import pandas as pd
+from st_aggrid import AgGrid, GridUpdateMode, DataReturnMode
+from database import save_hesaplama, get_hesaplamalar, get_hesaplama_by_id
+from utils import top_right_login
+from session_config import init_session_state
+from database import save_hesaplama
 
 # Session state başlatma
 init_session_state()
+
 setup_sidebar()
+
+# Sağ üstte giriş/kayıt butonları
 top_right_login()
 
-st.title("Perde Kapasite Kontrolü")
+# COM kütüphanesini başlat
 
-# Canlı ETABS Durumu
-render_bridge_status(key="perde_kap_bridge_status")
+st.title("Perde Kapasite Kontrolü")
 
 tabs = st.tabs(["Hesaplama", "ℹ️"])
 
 with tabs[0]:
+
+
+    # URL'den saved_id parametresini al
     query_params = st.query_params
     saved_id = query_params.get("saved_id")
 
-    concrete_mapping = CONCRETE_OPTIONS
-
-    # AG Grid ayarları
-    grid_options = {
-        "columnDefs": [
-            {"headerName": "Kat", "field": "Story", "editable": True, "filter": "agSetColumnFilter", "maxWidth": 80, "minWidth": 80},
-            {"headerName": "Perde", "field": "Pier", "editable": True, "filter": "agSetColumnFilter"},
-            {"headerName": "Uzunluk (m)", "field": "WidthBot", "editable": True, "filter": "agSetColumnFilter",
-             "valueFormatter": "function(params){ return params.value != null ? Number(params.value).toFixed(2) : ''; }"},
-            {"headerName": "Kalınlık (m)", "field": "ThickBot", "editable": True, "filter": "agSetColumnFilter",
-             "valueFormatter": "function(params){ return params.value != null ? Number(params.value).toFixed(2) : ''; }"},
-            {"headerName": "BS", "field": "Beton Sınıfı", "editable": True, "filter": "agSetColumnFilter",
-             "cellEditor": "agSelectCellEditor", "cellEditorParams": {"values": list(concrete_mapping.keys())}},
-            {"headerName": "Kombinasyon", "field": "Deprem Kombinasyonu", "editable": True, "filter": "agSetColumnFilter"},
-            {"headerName": "Ndm (kN)", "field": "Deprem Yük", "editable": True, "filter": "agSetColumnFilter",
-             "valueFormatter": "function(params){ return params.value != null ? Math.abs(params.value).toFixed(2) : ''; }"},
-            {"headerName": "Ach (m²)", "field": "Ach", "editable": True, "filter": "agSetColumnFilter",
-             "valueGetter": "data.WidthBot * data.ThickBot",
-             "valueFormatter": "function(params){ return params.value != null ? Number(params.value).toFixed(2) : ''; }"},
-            {"headerName": "MaxNdm", "field": "TBDY_Hesap", "editable": False, "filter": "agSetColumnFilter",
-             "valueGetter": "0.35 * (data['fck'] || 0) * (data.WidthBot * data.ThickBot)",
-             "valueFormatter": "function(params){ return params.value != null ? params.value.toFixed(2) : ''; }"},
-            {"headerName": "% Ndm/MaxNdm", "field": "%Ndm/MaxNdm", "editable": False, "filter": "agSetColumnFilter",
-             "valueGetter": "((Math.abs(data['Deprem Yük'] || 0) / (0.35 * (data['fck'] || 1) * (data.WidthBot * data.ThickBot))) * 100).toFixed(1) + '%'"},
-            {"headerName": "Durum", "field": "TBDY_Durum", "editable": False, "filter": "agSetColumnFilter",
-             "valueGetter": "(Math.abs(data['Deprem Yük'] || 0) < (0.35 * (data['fck'] || 0) * (data.WidthBot * data.ThickBot))) ? '✅' : '❌'"}
-        ],
-        "defaultColDef": {"resizable": True, "sortable": True, "filter": True},
-        "onCellValueChanged": "function(event) { event.api.refreshCells(); }",
-        "sideBar": {"toolPanels": ["columns", "filters"]},
-        "enableRangeSelection": True,
-        "enableFillHandle": True
+    # Beton sabitleri
+    concrete_mapping = {
+        "C16": 16000, "C18": 18000, "C20": 20000, "C25": 25000, "C30": 30000,
+        "C35": 35000, "C40": 40000, "C45": 45000, "C50": 50000, "C55": 55000, "C60": 60000
     }
 
+    # AG Grid yapılandırması
+    grid_options = {
+        "columnDefs": [
+            {"headerName": "Kat", "field": "Story", "editable": True, "filter": "agSetColumnFilter"},
+            {"headerName": "Perde", "field": "Pier", "editable": True, "filter": "agSetColumnFilter"},
+            {"headerName": "Uzunluk", "field": "WidthBot", "editable": True, "filter": "agSetColumnFilter"},
+            {"headerName": "Kalınlık", "field": "ThickBot", "editable": True, "filter": "agSetColumnFilter"},
+            {"headerName": "Beton Sınıfı", "field": "Beton Sınıfı", "editable": True, "filter": "agSetColumnFilter",
+            "cellEditor": "agSelectCellEditor", "cellEditorParams": {"values": list(concrete_mapping.keys())}},
+            {"headerName": "Kombinasyon", "field": "Deprem Kombinasyonu", "editable": True, "filter": "agSetColumnFilter"},
+            {"headerName": "Yük", "field": "Deprem Yük", "editable": True, "filter": "agSetColumnFilter",
+            "valueFormatter": "function(params){ return params.value != null ? Math.abs(params.value).toFixed(2) : ''; }"},
+            
+            {"headerName": "Kapasite", "field": "Deprem Kapasite", "editable": False, "filter": "agSetColumnFilter",
+            "valueGetter": """
+                var mapping = {""" + ",".join([f"'{k}':{v}" for k, v in concrete_mapping.items()]) + """};
+                var cv = mapping[data['Beton Sınıfı']] || 0;
+                return Number(0.35 * cv * parseFloat(data.WidthBot || 0) * parseFloat(data.ThickBot || 0)).toFixed(2);
+            """},
+            {"headerName": "Deprem Yük Kapasite Yüzdesi", "field": "Deprem Yük Kapasite Yüzdesi", "editable": False, "filter": "agSetColumnFilter",
+            "valueGetter": """
+                var mapping = {""" + ",".join([f"'{k}':{v}" for k, v in concrete_mapping.items()]) + """};
+                var cv = mapping[data['Beton Sınıfı']] || 0;
+                var capacity = 0.35 * cv * parseFloat(data.WidthBot || 0) * parseFloat(data.ThickBot || 0);
+                return (data['Deprem Yük'] != null && capacity != 0) ?
+                        (Math.abs(parseFloat(data['Deprem Yük']) / capacity * 100)).toFixed(1) + '%' : '';
+            """},
+            {"headerName": "Durum Deprem", "field": "Durum Deprem", "editable": False, "filter": "agSetColumnFilter",
+            "valueGetter": """
+                var mapping = {""" + ",".join([f"'{k}':{v}" for k, v in concrete_mapping.items()]) + """};
+                var cv = mapping[data['Beton Sınıfı']] || 0;
+                var capacity = 0.35 * cv * parseFloat(data.WidthBot || 0) * parseFloat(data.ThickBot || 0);
+                return (data['Deprem Yük'] != null && capacity != 0) ?
+                        (parseFloat(data['Deprem Yük']) < capacity ? '✅' : '❌') : '';
+            """}
+        ],
+        "defaultColDef": {"resizable": True, "sortable": True, "filter": True},
+        "sideBar": {"toolPanels": ["columns", "filters"]},
+        "enableRangeSelection": True,
+        "suppressContextMenu": False,
+        "getContextMenuItems": "function(params) { var defaultItems = params.defaultItems; defaultItems.push({ name: 'Export CSV', action: function() { params.api.exportDataAsCsv(); } }); return defaultItems; }"
+    }
+
+    # Excel export fonksiyonu
+    def to_excel(df):
+        """DataFrame'i Excel formatına çevirir ve bayt olarak döndürür."""
+        ordered_columns = [
+            "Story", "Pier", "WidthBot", "ThickBot", "Beton Sınıfı", 
+            "Deprem Kombinasyonu", "Deprem Yük", "Deprem Kapasite", 
+            "Deprem Yük Kapasite Yüzdesi", "Durum Deprem"
+        ]
+        df = df[ordered_columns]
+        column_name_mapping = {'Story': 'Kat', 'Pier': 'Perde', 'WidthBot': 'Uzunluk', 'ThickBot': 'Kalınlık'}
+        df = df.rename(columns=column_name_mapping)
+        output = io.BytesIO()
+        writer = pd.ExcelWriter(output, engine="xlsxwriter")
+        df.to_excel(writer, sheet_name="Sheet1", index=False)
+        workbook = writer.book
+        worksheet = writer.sheets["Sheet1"]
+        for idx, col in enumerate(df.columns):
+            max_length = max(df[col].astype(str).apply(len).max(), len(col))
+            worksheet.set_column(idx, idx, max_length + 2)
+        writer.close()
+        return output.getvalue()
+
+    # Kaydedilmiş veriyi yükleme
     if saved_id:
-        username = st.session_state.get("username", "")
+        username = st.session_state["username"]
         record = get_hesaplama_by_id(saved_id, username)
         if record is not None:
             st.subheader(f"Kayıt: {record['hesap_tipi']} - {record['hesap_tarihi']}")
             sonuc_dict = json.loads(record["sonuc"])
+            
+            # Kaydedilmiş tabloyu DataFrame'e çevir
             updated_df = pd.DataFrame(sonuc_dict["final_table"])
-
+            
+            # AG Grid ile göster
             grid_response = AgGrid(
                 updated_df,
                 gridOptions=grid_options,
@@ -86,7 +131,8 @@ with tabs[0]:
                 enable_enterprise_modules=True,
                 key=f"aggrid_saved_{saved_id}"
             )
-
+            
+            # Excel export
             st.download_button(
                 "Excel Olarak İndir",
                 data=to_excel(updated_df),
@@ -95,102 +141,229 @@ with tabs[0]:
             )
         else:
             st.error("Kayıt bulunamadı veya erişim yetkiniz yok.")
-            st.stop()
     else:
-        combo_names = st.session_state.get("etabs_combinations", [])
-        if not combo_names:
-            combo_names = etabs_service.get_load_combinations()
+        # Yeni hesaplama modu
+        # Kullanıcının bilgisayarındaki ajan üzerinden bağlanılır; bağlantı
+        # yoksa connect_etabs kurulum panelini gösterip sayfayı durdurur.
+        SapModel = connect_etabs(units=6)  # kN-m birimleri
 
-        if not combo_names:
-            st.warning("⚠️ ETABS'e bağlanılıyor veya kombinasyon listesi yükleniyor... Lütfen STACONT Bridge'in açık olduğundan emin olun.")
+        # Yük kombinasyonlarını al
+        ret_combos = SapModel.RespCombo.GetNameList()
+        num_combos = ret_combos[0]
+        combo_names = ret_combos[1]
+
+        if num_combos <= 0:
+            st.error("ETABS'te yük kombinasyonları bulunamadı.")
             st.stop()
 
+        # Seçilen kombinasyona göre tabloyu çekme fonksiyonu
+        def get_table_for_combination(combo):
+            SapModel.DatabaseTables.SetLoadCasesSelectedForDisplay([])
+            SapModel.DatabaseTables.SetLoadCombinationsSelectedForDisplay([combo])
+            SapModel.DatabaseTables.SetLoadPatternsSelectedForDisplay([])
+
+            TableKey_modal = 'Pier Forces'
+            FieldKeyList = []
+            GroupName = 'All'
+            TableVersion = 1
+            FieldsKeysIncluded = []
+            NumberRecords = 0
+            TableData_modal = []
+
+            ret_modal = SapModel.DatabaseTables.GetTableForDisplayArray(
+                TableKey_modal, FieldKeyList, GroupName, TableVersion,
+                FieldsKeysIncluded, NumberRecords, TableData_modal
+            )
+
+            columns_modal = ret_modal[2]
+            data_list_modal = ret_modal[4]
+
+            num_columns_modal = len(columns_modal)
+            if num_columns_modal == 0:
+                st.error(f"ETABS'ten sütun verisi alınamadı. Tablo boş veya yanlış tablo anahtarı. ({combo})")
+                return None
+
+            rows_modal = [data_list_modal[i:i + num_columns_modal] for i in range(0, len(data_list_modal), num_columns_modal)]
+            df_modal = pd.DataFrame(rows_modal, columns=columns_modal)
+            df_modal.columns = df_modal.columns.str.strip()
+            df_modal['OriginalOrder'] = df_modal.index
+
+            df_modal['P'] = pd.to_numeric(df_modal['P'], errors='coerce')
+            max_idx = df_modal.groupby(['Story', 'Pier'], sort=False)['P'].apply(lambda x: x.abs().idxmax())
+            filtered_df = df_modal.loc[max_idx]
+            filtered_df = filtered_df.sort_values('OriginalOrder').reset_index(drop=True)
+
+            display_columns = ['Story', 'Pier', 'OutputCase', 'P']
+            filtered_df = filtered_df[display_columns]
+            return filtered_df
+
+        # Pier Section Properties tablosunu çekme fonksiyonu
+        def get_pier_section_properties():
+            table_key = 'Pier Section Properties'
+            FieldKeyList = []
+            GroupName = 'All'
+            TableVersion = 1
+            FieldsKeysIncluded = []
+            NumberRecords = 0
+            TableData = []
+
+            ret = SapModel.DatabaseTables.GetTableForDisplayArray(
+                table_key, FieldKeyList, GroupName, TableVersion,
+                FieldsKeysIncluded, NumberRecords, TableData
+            )
+            columns = ret[2]
+            data_list = ret[4]
+            num_columns = len(columns)
+            if num_columns == 0:
+                st.error(f"ETABS'ten sütun verisi alınamadı. ({table_key})")
+                return None
+            rows = [data_list[i:i + num_columns] for i in range(0, len(data_list), num_columns)]
+            df = pd.DataFrame(rows, columns=columns)
+            df.columns = df.columns.str.strip()
+            return df
+
+        # Kullanıcı Arayüzü
         st.subheader("Deprem Kombinasyon Seçimi")
-        col1, col2 = st.columns(2)
-        with col1:
-            main_deprem_combo = st.selectbox("Deprem Kombinasyon", combo_names, key="main_deprem_combo")
-            selected_concrete = st.selectbox("Beton Sınıfı", list(concrete_mapping.keys()), key="concrete_class")
-            concrete_value = concrete_mapping[selected_concrete]
+        main_deprem_combo = st.selectbox("Deprem Kombinasyon", combo_names, key="main_deprem_combo")
+        is_basement = st.checkbox("YAPI BODRUMLU MU?")
 
-        with col2:
-            is_basement = st.checkbox("YAPI BODRUMLU MU?")
-            if is_basement:
-                basement_deprem_combo = st.selectbox("Bodrum Deprem Kombinasyon", combo_names, key="basement_deprem_combo")
-                story_options = etabs_service.get_story_names()
-                basement_stories = st.multiselect("Bodrum Katlarını Seçiniz", options=story_options, key="basement_stories")
+        # Pier section properties'i erken al
+        df_pier_section = get_pier_section_properties()
+        if df_pier_section is None:
+            st.error("Pier Section tabloları alınamadı.")
+            st.stop()
 
+        # df_temp'i başlat
+        df_temp = get_table_for_combination(main_deprem_combo)
+
+        # Bodrum Seçenekleri
+        if is_basement:
+            st.subheader("Bodrum Seçenekleri")
+            story_options = df_temp['Story'].drop_duplicates().tolist() if df_temp is not None else []
+            basement_stories = st.multiselect("Bodrum Katlarını Seçiniz", options=story_options, key="basement_stories")
+            basement_deprem_combo = st.selectbox("Bodrum Deprem Kombinasyon", combo_names, key="basement_deprem_combo")
+
+        # Beton Sınıfı Seçimi
+        st.subheader("Beton Sınıfı Seçimi")
+        selected_concrete = st.selectbox("Beton Sınıfı", list(concrete_mapping.keys()), key="concrete_class")
+        concrete_value = concrete_mapping[selected_concrete]
+
+        # Final Tabloyu Getir
         if st.button("Final Tabloyu Getir"):
-            with st.spinner("ETABS perde verileri alınıyor..."):
-                bundle = etabs_service.get_pier_bundle(main_deprem_combo)
-                df_deprem = bundle.get("pier_forces", pd.DataFrame())
-                df_pier_section = bundle.get("pier_section", pd.DataFrame())
+            df_deprem = get_table_for_combination(main_deprem_combo)
+            df_deprem = df_deprem.rename(columns={'OutputCase': 'Deprem Kombinasyonu', 'P': 'Deprem Yük'})
+            merged_df = df_deprem
+            
+            if is_basement:
+                df_bodrum_deprem = get_table_for_combination(basement_deprem_combo)
+                
+                if basement_stories:
+                    df_bodrum_deprem = df_bodrum_deprem[df_bodrum_deprem["Story"].isin(basement_stories)]
+                
+                df_bodrum_deprem = df_bodrum_deprem.rename(columns={'OutputCase': 'Bodrum Deprem Kombinasyonu', 'P': 'Bodrum Deprem Yük'})
+                basement_merged = pd.merge(df_bodrum_deprem, df_pier_section[['Story', 'Pier', 'WidthBot', 'ThickBot']], 
+                                        on=['Story', 'Pier'], how='outer')
+                merged_final = pd.merge(merged_df, basement_merged, on=['Story', 'Pier'], how='left')
+                merged_final["Deprem Kombinasyonu"] = merged_final["Bodrum Deprem Kombinasyonu"].combine_first(merged_final["Deprem Kombinasyonu"])
+                merged_final["Deprem Yük"] = merged_final["Bodrum Deprem Yük"].combine_first(merged_final["Deprem Yük"])
+                main_table = merged_final.drop(columns=['Bodrum Deprem Kombinasyonu', 'Bodrum Deprem Yük'])
+            else:
+                main_table = pd.merge(merged_df, df_pier_section[['Story', 'Pier', 'WidthBot', 'ThickBot']], 
+                                    on=['Story', 'Pier'], how='left')
 
-                if df_deprem.empty or df_pier_section.empty:
-                    st.error("ETABS'ten perde verileri alınamadı.")
-                    st.stop()
+            final_table = main_table.copy()
+            final_table['Beton Sınıfı'] = selected_concrete
+            final_table['Deprem Yük'] = pd.to_numeric(final_table['Deprem Yük'], errors='coerce').abs().round(2)
+            final_table['WidthBot'] = pd.to_numeric(final_table['WidthBot'], errors='coerce')
+            final_table['ThickBot'] = pd.to_numeric(final_table['ThickBot'], errors='coerce')
+            
+            # İlk hesaplamalar
+            final_table["Area"] = (final_table["WidthBot"] * final_table["ThickBot"]).round(2)
+            final_table["Deprem Kapasite"] = (0.35 * concrete_value * final_table["Area"]).round(2)
+            final_table["Deprem Yük Kapasite Yüzdesi"] = ((final_table["Deprem Yük"] / final_table["Deprem Kapasite"]) * 100).round(1).astype(str) + '%'
+            final_table["Durum Deprem"] = final_table["Deprem Yük"] < final_table["Deprem Kapasite"]
+            final_table["Durum Deprem"] = final_table["Durum Deprem"].map({True: "✅", False: "❌"})
 
-                df_deprem = df_deprem.rename(columns={'OutputCase': 'Deprem Kombinasyonu', 'P': 'Deprem Yük'})
-                merged_df = df_deprem
+            st.session_state["final_table"] = final_table
 
-                if is_basement and 'basement_stories' in locals() and basement_stories:
-                    bundle_b = etabs_service.get_pier_bundle(basement_deprem_combo)
-                    df_bodrum = bundle_b.get("pier_forces", pd.DataFrame())
-                    if not df_bodrum.empty:
-                        df_bodrum = df_bodrum[df_bodrum["Story"].isin(basement_stories)]
-                        df_bodrum = df_bodrum.rename(columns={'OutputCase': 'Bodrum Deprem Kombinasyon', 'P': 'Bodrum Deprem Yük'})
-                        merged_df = pd.merge(merged_df, df_bodrum, on=['Story', 'Pier'], how='left')
-                        merged_df['Deprem Kombinasyonu'] = merged_df['Bodrum Deprem Kombinasyon'].combine_first(merged_df['Deprem Kombinasyonu'])
-                        merged_df['Deprem Yük'] = merged_df['Bodrum Deprem Yük'].combine_first(merged_df['Deprem Yük'])
-                        merged_df = merged_df.drop(columns=['Bodrum Deprem Kombinasyon', 'Bodrum Deprem Yük'])
-
-                merged_df = pd.merge(merged_df, df_pier_section[['Story', 'Pier', 'WidthBot', 'ThickBot']], on=['Story', 'Pier'], how='left')
-                merged_df['Beton Sınıfı'] = selected_concrete
-                merged_df['fck'] = concrete_value
-                merged_df['WidthBot'] = pd.to_numeric(merged_df['WidthBot'], errors='coerce')
-                merged_df['ThickBot'] = pd.to_numeric(merged_df['ThickBot'], errors='coerce')
-                merged_df['Deprem Yük'] = pd.to_numeric(merged_df['Deprem Yük'], errors='coerce')
-
-                merged_df['Ach'] = merged_df['WidthBot'] * merged_df['ThickBot']
-                merged_df['TBDY_Hesap'] = 0.35 * merged_df['fck'] * merged_df['Ach']
-                merged_df['%Ndm/MaxNdm'] = (merged_df['Deprem Yük'].abs() / merged_df['TBDY_Hesap'].replace(0, 1) * 100).round(1).astype(str) + '%'
-                merged_df['TBDY_Durum'] = np.where(merged_df['Deprem Yük'].abs() < merged_df['TBDY_Hesap'], '✅', '❌')
-
-                st.session_state["perde_final_table"] = merged_df
-
-        if "perde_final_table" in st.session_state:
-            disp_df = st.session_state["perde_final_table"]
+        # Tabloyu Görüntüle
+        if "final_table" in st.session_state:
             grid_response = AgGrid(
-                disp_df,
+                st.session_state["final_table"],
                 gridOptions=grid_options,
                 update_mode=GridUpdateMode.VALUE_CHANGED,
                 data_return_mode=DataReturnMode.AS_INPUT,
                 fit_columns_on_grid_load=True,
                 enable_enterprise_modules=True,
-                key="aggrid_perde_main"
+                key=f"aggrid_{selected_concrete}"
             )
+            
+            # AG Grid'den dönen güncel veriyi al
+            updated_df = pd.DataFrame(grid_response["data"])
+            
+            # Sayısal değerleri düzelt
+            updated_df["WidthBot"] = pd.to_numeric(updated_df["WidthBot"], errors="coerce")
+            updated_df["ThickBot"] = pd.to_numeric(updated_df["ThickBot"], errors="coerce")
+            updated_df["Deprem Yük"] = pd.to_numeric(updated_df["Deprem Yük"], errors="coerce").abs()
 
+            # Beton sınıfına göre kapasite hesaplamaları
+            updated_df["Area"] = (updated_df["WidthBot"] * updated_df["ThickBot"]).round(2)
+            updated_df["Deprem Kapasite"] = (0.35 * updated_df["Beton Sınıfı"].map(concrete_mapping).fillna(0) * updated_df["Area"]).round(2)
+            updated_df["Deprem Yük Kapasite Yüzdesi"] = ((updated_df["Deprem Yük"] / updated_df["Deprem Kapasite"]) * 100).round(1).astype(str) + '%'
+            updated_df["Durum Deprem"] = updated_df["Deprem Yük"] < updated_df["Deprem Kapasite"]
+            updated_df["Durum Deprem"] = updated_df["Durum Deprem"].map({True: "✅", False: "❌"})
+            
             st.divider()
-            col_p1, col_p2 = st.columns(2)
-            with col_p1:
-                rec_name = st.text_input("Kayıt İsmi:", value="Perde Kapasite Kontrolü")
-                if st.button("Sonucu Kaydet"):
-                    sonuc_dict = {"final_table": disp_df.to_dict(orient="records")}
-                    save_hesaplama(rec_name, json.dumps(sonuc_dict, ensure_ascii=False), st.session_state.get("username", "anon"), "perde_kapasite")
+            st.subheader("Sonuç Kaydetme")
+
+            # Yan yana iki sütun oluştur
+            col1, col2 = st.columns([1, 1])  # İki sütunu eşit genişlikte ayırdık
+
+            with col1:  # Sol sütun: Kayıt işlemi
+                record_name = st.text_input("Kayıt için bir isim giriniz:", value="Perde Kapasite Kontrolü", key="record_name_input")
+                kaydet_button = st.button("Sonucu Kaydet")
+                
+                if kaydet_button:
+                    hesap_tipi = record_name
+                    sonuc_dict = {
+                        "final_table": updated_df.to_dict(orient="records"),
+                        "concrete_class": selected_concrete,
+                        "main_deprem_combo": main_deprem_combo
+                    }
+                    if is_basement:
+                        sonuc_dict.update({
+                            "basement_stories": basement_stories,
+                            "basement_deprem_combo": basement_deprem_combo
+                        })
+                    sonuc_str = json.dumps(sonuc_dict, ensure_ascii=False, indent=2)
+                    save_hesaplama(hesap_tipi, sonuc_str, st.session_state["username"], "perde_kapasite")
                     st.success("Sonuç başarıyla kaydedildi!")
 
-            with col_p2:
+            with col2:  # Sağ sütun: Excel indirme butonu
                 st.download_button(
-                    label="Excel Olarak İndir",
-                    data=to_excel(disp_df),
+                    "Excel Olarak İndir",
+                    data=to_excel(updated_df),
                     file_name="perde_kapasite.xlsx",
-                    mime="application/vnd.ms-excel"
+                    mime="application/vnd.ms-excel",
                 )
 
 with tabs[1]:
-    st.markdown(r"""
-    ## TBDY 2018 Perde Eksenel Gerilme ve Kapasite Kontrolü
-
-    ### Madde 7.6.1.3
-    Düşey yükler ve deprem yüklerinin ortak etkisi altında perdelerde eksenel basınç gerilmesi:
-    $$ N_{dm} \leq 0.35 \cdot f_{ck} \cdot A_{ch} $$
+    st.markdown("""
+    ## Nasıl Çalışır?
+    - **ETABS Bağlantısı:** ETABS'in açık ve aktif olduğundan emin olun.
+    - **Deprem Kombinasyonu:** G+Q+E kombinasyonunu seçin.
+    - **Bodrum Seçenekleri:** Yapı bodrumlu ise, ilgili bodrum katlarını seçin ve bodrum katlar için kombinasyonunu belirleyin.
+    - **Beton Sınıfı Seçimi:** Kullandığınız beton sınıfını seçin.
+    - **Sonuç:** Gerekli seçimleri yaptıktan sonra **"Kontrol Et"** butonuna basın.
+    - **Kayıt:** Hesaplama sonuçlarını kaydedebilir veya Excel formatında indirebilirsiniz.
+    
+    ## TBDY 2018 
+    **Madde 7.6.1.1:** Perdenin boşluklar çıkarıldıktan sonra kalan net enkesit alanı, Ndm TS 498'de hareketli
+    yükler için tanımlanmış olan hareketli yük azaltma katsayıları da dikkate alınarak, G ve Q
+    düşey yükler ve E deprem etkisinin ortak etkisi **G+Q+E** altında hesaplanan eksenel basınç
+    kuvvetlerinin en büyüğü olmak üzere, **Ac ≥ Ndm / (0.35 fck)** koşulunu sağlayacaktır. Bağ kirişli
+    (boşluklu) perdelerde Ac ve Ndm değerlerinin hesabında, boşluklu perde kesitinin tümü (perde
+    parçalarının toplamı) gözönüne alınacaktır.
     """)
+
+# COM kütüphanesini kapatma

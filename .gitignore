@@ -1,0 +1,40 @@
+# --- Sirlar ---------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- Veritabanlari (kullanici verisi icerir, depoya girmez) ---------------
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# --- Uretilen ajan paketleri ----------------------------------------------
+dist/
+build/
+static/StacontrolAgent*.zip
+
+# --- Python ---------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Editor / isletim sistemi ---------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Muhtelif -------------------------------------------------------------
+*.log
+Yeni Metin Belgesi.cmd

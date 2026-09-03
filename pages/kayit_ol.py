@@ -8,7 +8,6 @@ st.set_page_config(
 )
 from sidebar import setup_sidebar
 # Gerekli fonksiyonları içe aktarıyoruz
-from utils import hash_password
 from database import register_user
 from session_config import init_session_state
 
@@ -28,11 +27,12 @@ if st.button("Kayıt Ol"):
     elif password != password2:
         st.error("Şifreler eşleşmiyor!")
     else:
-        hashed_password = hash_password(password)
-        success, message = register_user(username, hashed_password)
+        # Şifre düz metin gönderilir; hash'leme database.register_user içinde
+        # bcrypt ile yapılır (bkz. database.py).
+        success, message = register_user(username, password)
         if success:
             st.success(message)
         else:
             st.error(message)
 
-st.markdown("Zaten hesabınız varsa, [Üyelik Girişi](./üyelik_Girisi) sayfasından giriş yapabilirsiniz.")
+st.markdown("Zaten hesabınız varsa, [Üyelik Girişi](./uyelik_girisi) sayfasından giriş yapabilirsiniz.")

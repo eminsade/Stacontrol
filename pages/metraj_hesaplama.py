@@ -7,11 +7,11 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 from sidebar import setup_sidebar
+from etabs_bridge.streamlit_ui import connect_etabs
 import pandas as pd
 from collections import Counter
 import numpy as np
 import plotly.graph_objects as go
-import etabs_service
 
 from database import save_hesaplama, get_hesaplamalar
 from utils import top_right_login
@@ -29,15 +29,10 @@ top_right_login()
 st.title("ETABS Metraj ve 3D Model Görselleştirme")
 
 # Initialize ETABS connection
-with st.spinner("ETABS'e bağlanılıyor..."):
-    SapModel = etabs_service.get_active_sap_model()
-    if SapModel is None:
-        st.error("ETABS'e bağlanılamadı. Lütfen STACONT Bridge'in ve ETABS modelinizin açık olduğundan emin olun.")
-        st.stop()
-    st.success("ETABS'e başarıyla bağlanıldı!")
-
-    # Set units to ton-meter
-    SapModel.SetPresentUnits(12)
+# Kullanıcının bilgisayarındaki ajan üzerinden bağlanılır; bağlantı yoksa
+# connect_etabs kurulum panelini gösterip sayfayı durdurur.
+# Birim 12 = ton-m (metraj hesabı bu birimde yapılır).
+SapModel = connect_etabs(units=12)
 
 # Function to fetch table data from ETABS
 def get_etabs_table(table_key, group_name="All"):
@@ -775,4 +770,3 @@ if st.session_state.fig is not None:
 # Görsel iyileştirme için biraz boşluk ekleyelim
 st.markdown("<br>", unsafe_allow_html=True)
 
-comtypes.CoUninitialize()

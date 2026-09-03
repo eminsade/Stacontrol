@@ -6,14 +6,15 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 from sidebar import setup_sidebar
+from etabs_bridge.streamlit_ui import connect_etabs
 import pandas as pd
 import plotly.graph_objects as go
 import json
 import io
-import etabs_service
 
 from database import save_hesaplama, get_hesaplamalar
 from utils import top_right_login
+from database import save_hesaplama
 from session_config import init_session_state
 
 
@@ -33,6 +34,7 @@ st.title("Göreli Kat Ötelemesi Kontrolü")
 tabs = st.tabs(["Hesaplama", "ℹ️"])
 
 with tabs[0]:
+
 
     # -------------------------------------------------------------------------
     # URL'deki saved_id kontrolü (Query Params)
@@ -120,36 +122,53 @@ with tabs[0]:
             st.error("Geçersiz saved_id parametresi")
             st.stop()
 
-    # Canlı ETABS Durumu
-    from bridge_client import render_bridge_status
-    render_bridge_status(key="drift_bridge_status")
+    # =============================================================================
+    # 1. ETABS'e Bağlanma
+    # =============================================================================
+    # Kullanıcının bilgisayarındaki ajan üzerinden bağlanılır. Bağlantı yoksa
+    # connect_etabs kurulum panelini gösterip sayfayı durdurur.
+    SapModel = connect_etabs()
 
-    # Yük Durumları ve Modal Verilerin Hazırlanması
-    case_names = st.session_state.get("etabs_load_cases", []) or etabs_service.get_load_cases()
+    # =============================================================================
+    # 2. Story Drifts Yük Durumları ve Modal Participating Mass Ratios Verisinin Hazırlanması
+    # =============================================================================
+    ret_cases = SapModel.LoadCases.GetNameList()
+    number_of_cases = ret_cases[0]
+    case_names = ret_cases[1]
 
-    df_modal = pd.DataFrame()
-    # 1. Bridge veya COM'dan Modal veriyi al
-    df_modal_resp = etabs_service._fetch_from_bridge('/api/table', params={'name': 'Modal Participating Mass Ratios'})
-    if df_modal_resp and df_modal_resp.get("success") and df_modal_resp.get("data"):
-        df_modal = pd.DataFrame(df_modal_resp.get("data"))
-    else:
-        SapModel = etabs_service.get_active_sap_model()
-        if SapModel:
-            try:
-                SapModel.DatabaseTables.SetLoadCasesSelectedForDisplay([])
-                SapModel.DatabaseTables.SetLoadCombinationsSelectedForDisplay([])
-                SapModel.DatabaseTables.SetLoadPatternsSelectedForDisplay([])
-                ret_modal = SapModel.DatabaseTables.GetTableForDisplayArray('Modal Participating Mass Ratios', [], 'All', 1, [], 0, [])
-                cols_m = [c.strip() for c in ret_modal[2]] if ret_modal[2] else []
-                raw_m = ret_modal[4] if ret_modal[2] else []
-                df_modal = pd.DataFrame([raw_m[i:i + len(cols_m)] for i in range(0, len(raw_m), len(cols_m))], columns=cols_m) if cols_m else pd.DataFrame()
-            except Exception:
-                pass
+    if number_of_cases <= 0:
+        st.error("ETABS'te Story Drifts için yük durumları bulunamadı.")
+        st.stop()
 
-    if not df_modal.empty and "Case" in df_modal.columns:
+    # Modal tablo verileri
+    TableKey_modal = 'Modal Participating Mass Ratios'
+    FieldKeyList = []
+    GroupName = 'All'
+    TableVersion = 1
+    FieldsKeysIncluded = []
+    NumberRecords = 0
+
+    SapModel.DatabaseTables.SetLoadCasesSelectedForDisplay([])
+    SapModel.DatabaseTables.SetLoadCombinationsSelectedForDisplay([])
+    SapModel.DatabaseTables.SetLoadPatternsSelectedForDisplay([])
+
+    TableData_modal = []
+    ret_modal = SapModel.DatabaseTables.GetTableForDisplayArray(
+        TableKey_modal, FieldKeyList, GroupName, TableVersion,
+        FieldsKeysIncluded, NumberRecords, TableData_modal
+    )
+    columns_modal = ret_modal[2]
+    data_list_modal = ret_modal[4]
+    num_columns_modal = len(columns_modal)
+    rows_modal = [data_list_modal[i: i + num_columns_modal] for i in range(0, len(data_list_modal), num_columns_modal)]
+    df_modal = pd.DataFrame(rows_modal, columns=columns_modal)
+    df_modal.columns = df_modal.columns.str.strip()
+
+    if "Case" in df_modal.columns:
         unique_modal_cases = sorted(df_modal["Case"].unique())
     else:
-        unique_modal_cases = case_names
+        st.warning("Modal Participating Mass Ratios tablosunda 'Case' sütunu bulunamadı!")
+        unique_modal_cases = []
 
     # =============================================================================
     # 3. Gerekli Girişlerin Tek Formda Toplanması
@@ -159,33 +178,24 @@ with tabs[0]:
         with col1:
             st.markdown('<h3 style="font-size:20px;">Yük Durumu Seçimi</h3>', unsafe_allow_html=True)
             selected_cases_x = st.multiselect("X Yönü için Yük Durumunu Seçin:", case_names)
-            selected_cases_y = st.multiselect("Y Yönü için Yük Durumunu Seçin:", case_names)
-            selected_modal_cases = st.multiselect(
-                "Modal Tablosu için Case Seçin:",
-                options=unique_modal_cases,
-                default=unique_modal_cases[:1] if unique_modal_cases else []
-            )
-
-            st.markdown('<h3 style="font-size:20px;">Yapı Bilgileri</h3>', unsafe_allow_html=True)
-            bina_turu = st.selectbox(
-                "Bina Türü:",
-                ["Diğer Binalar (0.008)", "Gevrek Malzemeden Yapılmış Dolgu Duvarları (0.016)"]
-            )
-
+            st.markdown('<h3 style="font-size:20px;">DD2</h3>', unsafe_allow_html=True)
+            Sds_DD2 = st.number_input("Sds Değeri", min_value=0.0, format="%.3f")
+            Sd1_DD2 = st.number_input("Sd1 Değeri", min_value=0.0, format="%.3f")
+            st.markdown('<h3 style="font-size:20px;">DD3</h3>', unsafe_allow_html=True)
+            Sds_DD3 = st.number_input(" Sds Değeri", min_value=0.0, format="%.3f")
+            Sd1_DD3 = st.number_input(" Sd1 Değeri", min_value=0.0, format="%.3f")
         with col2:
-            st.markdown('<h3 style="font-size:20px;">DD-2 Deprem Düzeyi</h3>', unsafe_allow_html=True)
-            Sds_DD2 = st.number_input("Sds (DD-2):", value=1.0, min_value=0.0, format="%.4f")
-            Sd1_DD2 = st.number_input("Sd1 (DD-2):", value=0.5, min_value=0.0, format="%.4f")
+            selected_cases_y = st.multiselect("Y Yönü için Yük Durumunu Seçin:", case_names)
+            selected_modal_cases = st.multiselect("Modal Case Seçin:", unique_modal_cases)
+            st.markdown('<h3 style="font-size:20px;">Yapı Bilgileri</h3>', unsafe_allow_html=True)
+            R = st.number_input("R Değeri", value=0.0, format="%.1f")
+            I = st.number_input("I Değeri", value=0.0, format="%.1f")
+            K_option = st.selectbox("K Değeri", options=["1 (Betonarme)", "0.5 (Çelik)"])
+            K = 1.0 if K_option == "1 (Betonarme)" else 0.5
+            Ks_option = st.selectbox("Ks Değeri", options=["0.008 (4.34a)", "0.016 (4.34b)"])
+            Ks = 0.008 if Ks_option == "0.008 (4.34a)" else 0.016
 
-            st.markdown('<h3 style="font-size:20px;">DD-3 Deprem Düzeyi</h3>', unsafe_allow_html=True)
-            Sds_DD3 = st.number_input("Sds (DD-3):", value=0.6, min_value=0.0, format="%.4f")
-            Sd1_DD3 = st.number_input("Sd1 (DD-3):", value=0.3, min_value=0.0, format="%.4f")
-
-            st.markdown('<h3 style="font-size:20px;">Diğer Parametreler</h3>', unsafe_allow_html=True)
-            I_input = st.number_input("Bina Önem Katsayısı (I):", value=1.0, min_value=0.1, format="%.2f")
-            R_input = st.number_input("Taşıyıcı Sistem Davranış Katsayısı (R):", value=8.0, min_value=0.1, format="%.2f")
-
-        hesapla_button = st.form_submit_button("Hesapla")
+        hesapla_button = st.form_submit_button(label="Kontrol Et")
 
     # =============================================================================
     # 4. Hesaplamaların Yapılması (Form gönderildikten sonra)
@@ -200,6 +210,46 @@ with tabs[0]:
         elif Sds_DD2 == 0 or Sds_DD3 == 0:
             st.error("Hata: Sds değerleri sıfır olamaz.")
         else:
+            # 4.1 ETABS'ten Story Drifts verisinin çekilmesi
+            TableKey = 'Story Drifts'
+            FieldKeyList = []
+            GroupName = 'All'
+            TableVersion = 1
+            FieldsKeysIncluded = []
+            NumberRecords = 0
+
+            # X yönü için veriler:
+            SapModel.DatabaseTables.SetLoadCasesSelectedForDisplay(selected_cases_x)
+            SapModel.DatabaseTables.SetLoadCombinationsSelectedForDisplay([])
+            SapModel.DatabaseTables.SetLoadPatternsSelectedForDisplay([])
+            TableData = []
+            ret_x = SapModel.DatabaseTables.GetTableForDisplayArray(
+                TableKey, FieldKeyList, GroupName, TableVersion,
+                FieldsKeysIncluded, NumberRecords, TableData
+            )
+            columns_x = ret_x[2]
+            data_list_x = ret_x[4]
+            num_columns_x = len(columns_x)
+            rows_x = [data_list_x[i: i + num_columns_x] for i in range(0, len(data_list_x), num_columns_x)]
+            df_x = pd.DataFrame(rows_x, columns=columns_x)
+            df_x.columns = df_x.columns.str.strip()
+            df_x["Direction"] = df_x["Direction"].astype(str).str.strip().str.upper()
+            df_x_filtered = df_x[df_x["Direction"] == "X"]
+            required_columns = ["Story", "OutputCase", "Direction", "Drift"]
+            df_x_final = df_x_filtered[required_columns] if set(required_columns).issubset(df_x_filtered.columns) else df_x_filtered
+
+            # Y yönü için veriler:
+            SapModel.DatabaseTables.SetLoadCasesSelectedForDisplay(selected_cases_y)
+            SapModel.DatabaseTables.SetLoadCombinationsSelectedForDisplay([])
+            SapModel.DatabaseTables.SetLoadPatternsSelectedForDisplay([])
+            TableData = []
+            ret_y = SapModel.DatabaseTables.GetTableForDisplayArray(
+                TableKey, FieldKeyList, GroupName, TableVersion,
+                FieldsKeysIncluded, NumberRecords, TableData
+            )
+            columns_y = ret_y[2]
+            data_list_y = ret_y[4]
+            num_columns_y = len(columns_y)
             rows_y = [data_list_y[i: i + num_columns_y] for i in range(0, len(data_list_y), num_columns_y)]
             df_y = pd.DataFrame(rows_y, columns=columns_y)
             df_y.columns = df_y.columns.str.strip()
