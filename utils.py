@@ -8,17 +8,17 @@ sahtekarligi mumkun hale gelir. Bu yuzden uretimde ortam degiskeni **zorunlu**
 tutulur; yalnizca ``STACONTROL_DEV=1`` iken gecici bir anahtar uretilir.
 """
 
-import os
 import secrets
 import sys
 
 import streamlit as st
 from streamlit_cookies_manager import EncryptedCookieManager
 
+from etabs_bridge import settings
 from session_config import init_session_state
 
-_DEV = os.environ.get("STACONTROL_DEV", "").strip().lower() in {"1", "true", "yes"}
-_COOKIES_PASSWORD = os.environ.get("COOKIES_PASSWORD", "").strip()
+_DEV = (settings.get("STACONTROL_DEV") or "").lower() in {"1", "true", "yes"}
+_COOKIES_PASSWORD = settings.get("COOKIES_PASSWORD")
 
 if not _COOKIES_PASSWORD:
     if _DEV:
@@ -30,11 +30,7 @@ if not _COOKIES_PASSWORD:
             file=sys.stderr,
         )
     else:
-        st.error(
-            "Sunucu yapilandirmasi eksik: COOKIES_PASSWORD tanimli degil. "
-            "Lutfen site yoneticisine bildirin."
-        )
-        st.stop()
+        _COOKIES_PASSWORD = settings.require("COOKIES_PASSWORD", settings.SECRETS_HINT)
 
 # 1. Çerez Yöneticisini Başlatma
 cookies = EncryptedCookieManager(prefix="stacontrol/", password=_COOKIES_PASSWORD)

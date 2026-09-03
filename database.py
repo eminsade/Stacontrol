@@ -13,7 +13,6 @@ Uretim notlari
 
 import hashlib
 import hmac
-import os
 import re
 import sqlite3
 import time
@@ -22,11 +21,13 @@ from datetime import datetime
 import bcrypt
 import pandas as pd
 
-DB_NAME = os.environ.get("STACONTROL_DB", "hesaplama_sonuc.db")
+from etabs_bridge import settings
+
+DB_NAME = settings.get("STACONTROL_DB") or "hesaplama_sonuc.db"
 
 #: bcrypt maliyet katsayisi. 12 ~ 250 ms; giris hizini kabul edilebilir
 #: tutarken kaba kuvvet saldirisini pahali kilar.
-_BCRYPT_ROUNDS = int(os.environ.get("STACONTROL_BCRYPT_ROUNDS", "12"))
+_BCRYPT_ROUNDS = int(settings.get("STACONTROL_BCRYPT_ROUNDS") or "12")
 
 #: Eski (yukseltilmemis) SHA-256 ozeti bicimi.
 _LEGACY_SHA256 = re.compile(r"^[0-9a-f]{64}$")

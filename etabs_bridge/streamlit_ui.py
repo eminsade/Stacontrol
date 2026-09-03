@@ -25,6 +25,7 @@ from typing import Optional
 
 import streamlit as st
 
+from . import settings
 from .client import DEFAULT_CACHE_TTL, BridgeTransport, RemoteSapModel
 from .protocol import AgentBusyError, AgentOfflineError, BridgeError
 
@@ -37,24 +38,23 @@ _CLIENT_KEY = "_etabs_client_id"
 #: ``.streamlit/config.toml`` icinde ``enableStaticServing = true`` olmali).
 #: Buyuk dosyayi nginx ile servis etmek daha verimlidir; o durumda bu ortam
 #: degiskenini kendi adresinizle ezin.
-AGENT_DOWNLOAD_URL = os.environ.get(
+AGENT_DOWNLOAD_URL = settings.get(
     "AGENT_DOWNLOAD_URL", "app/static/StacontrolAgent.zip"
 )
 
 
 def _bridge_url() -> str:
-    return os.environ.get("BRIDGE_URL", "http://127.0.0.1:8500").rstrip("/")
+    """Kopru API'sinin adresi.
+
+    Ayni sunucuda calisirken localhost; Streamlit Community Cloud gibi tek
+    surecli ortamlarda koprunun genel HTTPS adresi olmalidir (kopru orada
+    barinamaz, ayri bir yerde calismalidir -- bkz. README).
+    """
+    return (settings.get("BRIDGE_URL") or "http://127.0.0.1:8500").rstrip("/")
 
 
 def _internal_key() -> str:
-    key = os.environ.get("BRIDGE_INTERNAL_KEY", "").strip()
-    if not key:
-        st.error(
-            "Sunucu yapilandirmasi eksik: BRIDGE_INTERNAL_KEY tanimli degil. "
-            "Lutfen site yoneticisine bildirin."
-        )
-        st.stop()
-    return key
+    return settings.require("BRIDGE_INTERNAL_KEY", settings.SECRETS_HINT)
 
 
 @st.cache_resource(show_spinner=False)

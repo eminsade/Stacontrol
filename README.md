@@ -76,6 +76,57 @@ tests/test_bridge_e2e.py       ETABS olmadan uçtan uca köprü testi
 
 ---
 
+## Nerede barındırılır? (önemli)
+
+Uygulama **iki servisten** oluşur ve ikisinin de dışarıdan erişilebilir olması
+gerekir:
+
+| Servis | Port | Kime açık olmalı |
+|---|---|---|
+| Streamlit web arayüzü | 8501 | Tarayıcıya |
+| Köprü API'si | 8500 | **Ajana** (kullanıcının bilgisayarına) |
+
+### ⚠️ Streamlit Community Cloud tek başına yetmez
+
+Streamlit Community Cloud yalnızca tek bir süreç (`streamlit run`) çalıştırır ve
+yalnızca Streamlit'in kendi HTTP/WebSocket ucunu yayınlar. **İkinci bir portu
+dışarı açmanın yolu yoktur**, dolayısıyla ajanın bağlanacağı `/api/agent/poll`
+adresi orada barındırılamaz. Ayrıca dosya sistemi kalıcı değildir: uygulama
+uykuya daldığında veya yeniden dağıtıldığında `hesaplama_sonuc.db` sıfırlanır —
+kullanıcı hesapları ve kayıtlı hesaplar silinir.
+
+İki seçeneğiniz var:
+
+**A) Karma kurulum — mevcut Streamlit Cloud adresinizi korursunuz**
+
+Arayüz Streamlit Cloud'da kalır, köprüyü küçük bir yere koyarsınız
+(Fly.io / Render / Railway / 5 USD'lik VPS — tek bir uvicorn süreci, çok hafif):
+
+1. Köprüyü orada çalıştırın, kendisine bir HTTPS adresi verin
+   (örn. `https://kopru.stacontrol.com`).
+2. Streamlit Cloud'da **Manage app → Settings → Secrets** bölümüne
+   `.streamlit/secrets.toml.example` içeriğini uyarlayarak yapıştırın;
+   `BRIDGE_URL` köprünün genel adresi olmalı.
+3. Ajan paketini o adresle üretin:
+   `--bridge-url https://kopru.stacontrol.com`
+4. Zip'i **GitHub Releases**'e yükleyip `AGENT_DOWNLOAD_URL` olarak verin
+   (Streamlit Cloud'un statik klasörü depo ile birlikte dağıtıldığı için
+   11 MB'lık zip'i repoya koymak istemezsiniz).
+
+Kullanıcı veritabanı hâlâ geçici olur; kalıcılık için harici bir Postgres
+(örn. Neon/Supabase ücretsiz katman) bağlayıp `database.py`'yi ona
+yönlendirmeniz gerekir.
+
+**B) Tek sunucu — önerilen**
+
+Her ikisini de kendi sunucunuzda çalıştırırsınız; `deploy/` klasöründeki
+systemd birimleri ve nginx yapılandırması tam olarak bunun içindir. Veritabanı
+kalıcı olur, ajan `https://siteniz.com/bridge` adresine bağlanır, tek alan adı,
+tek sertifika. "Kendi web sitem üzerinde yayınlayacağım" hedefinize uyan yol
+budur.
+
+---
+
 ## Yerel geliştirme
 
 ```bash
