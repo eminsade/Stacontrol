@@ -1,19 +1,41 @@
+# ===========================================================================
+#  Stacontrol - bagimliliklar
+#
+#  ONEMLI: Ust sinirlar bilincli olarak konuldu, "eskimis" degildir.
+#  Bu surumler gercek ETABS modeliyle test edildi. Ust sinir kaldirilirsa
+#  paket yoneticisi en yeni surumleri kurar ve asagidaki iki sorun cikar:
+#
+#  1. pandas 3.0'da metin sutunlarinin varsayilan dtype'i "object" degil
+#     "str" oldu. pages/2_kolon_kapasite.py icinde uc yerde kullanilan
+#         df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
+#     kalibi bu durumda SESSIZCE calismaz; ETABS tablolarindaki bosluklu
+#     degerler kirpilmaz ve groupby eslesmeleri bozulur. Yanlis sonuc
+#     uretir, hata vermez -- bir kontrol aracinda en kotu hata turu.
+#     (pandas 3 ayrica copy-on-write'i zorunlu kilar; diger sayfalardaki
+#     zincirli atamalar da gozden gecirilmeden yukseltilmemeli.)
+#
+#  2. streamlit-cookies-manager 0.2.0 kaldirilmis olan st.cache API'sini
+#     kullanir. utils.py icinde uyumluluk kalkani var ama surumu de
+#     sinirlamak ikinci bir emniyet katmanidir.
+#
+#  Yukseltmeden once gercek bir modelle sayfalari elle dogrulayin.
+# ===========================================================================
+
 # --- Web uygulamasi (sunucu) ---
-streamlit>=1.41,<2
-streamlit-cookies-manager>=0.2.0
-streamlit-aggrid>=1.0.5
-pandas>=2.2
-numpy>=1.26
-plotly>=5.22
-XlsxWriter>=3.2
-openpyxl>=3.1
-Pillow>=10.3
-bcrypt>=4.1
+streamlit>=1.41,<1.50
+streamlit-cookies-manager>=0.2.0,<0.3
+streamlit-aggrid>=1.0.5,<2
+pandas>=2.2,<3
+numpy>=1.26,<3
+plotly>=6.0,<7
+XlsxWriter>=3.2,<4
+openpyxl>=3.1,<4
+Pillow>=10.3,<12
+bcrypt>=4.1,<6
 
 # --- Kopru sunucusu (ajan <-> web) ---
-fastapi>=0.110
-uvicorn[standard]>=0.27
-requests>=2.32
-
-# --- Gelistirme / test ---
-# pytest>=8.0
+# Kopru ayri bir makinede calisiyorsa (Streamlit Cloud + harici kopru
+# kurulumu) bu ucu web tarafinda gereksizdir; kurulu olmasi zarar vermez.
+fastapi>=0.110,<1
+uvicorn[standard]>=0.27,<1
+requests>=2.32,<3

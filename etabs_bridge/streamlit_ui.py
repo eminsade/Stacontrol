@@ -53,6 +53,16 @@ def _bridge_url() -> str:
     return (settings.get("BRIDGE_URL") or "http://127.0.0.1:8500").rstrip("/")
 
 
+def bridge_configured() -> bool:
+    """Kopru adresi/anahtari tanimli mi?
+
+    Anasayfa ve kenar cubugu gibi ETABS gerektirmeyen yerlerin, yapilandirma
+    eksikken kullaniciya teknik hata basmadan sessizce "bagli degil" diyebilmesi
+    icin ayri bir kontrol.
+    """
+    return bool(settings.get("BRIDGE_INTERNAL_KEY"))
+
+
 def _internal_key() -> str:
     return settings.require("BRIDGE_INTERNAL_KEY", settings.SECRETS_HINT)
 
@@ -86,10 +96,18 @@ def current_username() -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 def agent_status(username: str) -> dict:
+    """Ajan durumunu dondurur. Asla istisna firlatmaz.
+
+    Donen sozlukte ``configured`` alani, koprunun sunucu tarafinda
+    yapilandirilip yapilandirilmadigini soyler; ``False`` ise sorun
+    kullanicida degil kurulumdadir.
+    """
+    if not bridge_configured():
+        return {"connected": False, "configured": False}
     try:
-        return get_transport().status(username)
+        return {"configured": True, **get_transport().status(username)}
     except Exception as exc:
-        return {"connected": False, "error": str(exc)}
+        return {"connected": False, "configured": True, "error": str(exc)}
 
 
 def pair_agent(username: str, code: str) -> dict:
@@ -107,6 +125,26 @@ def disconnect_agent(username: str) -> None:
 
 def _render_setup_panel(username: str, status: dict) -> None:
     """Ajan yokken gosterilen kurulum + eslestirme paneli."""
+    if not status.get("configured", True):
+        st.error(
+            "ETABS koprusu bu sunucuda yapilandirilmamis, bu yuzden hesap "
+            "sayfalari calismiyor. Sorun sizde degil; site yoneticisinin "
+            "kopru servisini kurmasi gerekiyor."
+        )
+        st.caption(
+            "Yonetici notu: BRIDGE_INTERNAL_KEY ve BRIDGE_URL tanimli degil. "
+            + settings.SECRETS_HINT
+        )
+        return
+
+    if status.get("error"):
+        st.error(
+            "ETABS koprusune ulasilamiyor. Kopru servisi calismiyor olabilir; "
+            "birazdan tekrar deneyin."
+        )
+        st.caption(f"Teknik ayrinti: {status['error']}")
+        return
+
     st.warning("Bu sayfa ETABS modelinize baglanmayi gerektiriyor.")
 
     if status.get("connected") and not status.get("online"):

@@ -12,10 +12,24 @@ import secrets
 import sys
 
 import streamlit as st
-from streamlit_cookies_manager import EncryptedCookieManager
 
-from etabs_bridge import settings
-from session_config import init_session_state
+# --- streamlit-cookies-manager uyumluluk kalkani -----------------------------
+# streamlit_cookies_manager 0.2.0 (son surum, 2022'den beri guncellenmiyor)
+# ``@st.cache`` dekoratorunu kullanir. Streamlit bu API'yi kaldirdigi icin
+# paketin ICE AKTARILMASI bile AttributeError ile cokuyor ve tum sayfalar
+# birden dusuyor.
+#
+# Kalkan, ice aktarmadan ONCE tanimlanmali. Paketin tek kullanimi
+# ``key_from_parameters(salt, iterations, password)`` -- deterministik ve
+# hashable argumanlar alip bytes donduren saf bir fonksiyon; ``st.cache_data``
+# ile davranissal olarak esdegerdir.
+if not hasattr(st, "cache"):  # pragma: no cover - surume bagli
+    st.cache = st.cache_data
+
+from streamlit_cookies_manager import EncryptedCookieManager  # noqa: E402
+
+from etabs_bridge import settings  # noqa: E402
+from session_config import init_session_state  # noqa: E402
 
 _DEV = (settings.get("STACONTROL_DEV") or "").lower() in {"1", "true", "yes"}
 _COOKIES_PASSWORD = settings.get("COOKIES_PASSWORD")

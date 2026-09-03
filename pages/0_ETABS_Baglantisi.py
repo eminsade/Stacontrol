@@ -22,6 +22,7 @@ from etabs_bridge.streamlit_ui import (
     pair_agent,
 )
 from etabs_bridge.protocol import BridgeError
+from etabs_bridge.settings import SECRETS_HINT
 
 init_session_state()
 setup_sidebar()
@@ -36,6 +37,18 @@ if not username:
     st.stop()
 
 status = agent_status(username)
+
+if not status.get("configured", True):
+    st.error(
+        "ETABS koprusu bu sunucuda henuz yapilandirilmamis. Baglanti "
+        "kurulamaz; site yoneticisinin kopru servisini kurmasi gerekiyor."
+    )
+    st.caption(
+        "Yonetici notu: BRIDGE_INTERNAL_KEY ve BRIDGE_URL tanimli degil. "
+        + SECRETS_HINT
+    )
+    st.stop()
+
 connected = bool(status.get("connected"))
 online = bool(status.get("online"))
 
