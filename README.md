@@ -117,7 +117,8 @@ Kullanıcı veritabanı hâlâ geçici olur; kalıcılık için harici bir Postg
 (örn. Neon/Supabase ücretsiz katman) bağlayıp `database.py`'yi ona
 yönlendirmeniz gerekir.
 
-**B) Tek sunucu — önerilen**
+**B) Tek sunucu — önerilen**  
+_Adım adım rehber: [deploy/KURULUM.md](deploy/KURULUM.md) — tek komutluk kurulum betiği dahil._
 
 Her ikisini de kendi sunucunuzda çalıştırırsınız; `deploy/` klasöründeki
 systemd birimleri ve nginx yapılandırması tam olarak bunun içindir. Veritabanı
