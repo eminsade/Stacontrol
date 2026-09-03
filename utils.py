@@ -36,20 +36,27 @@ from streamlit_cookies_manager import EncryptedCookieManager  # noqa: E402
 from etabs_bridge import settings  # noqa: E402
 from session_config import init_session_state  # noqa: E402
 
-_DEV = (settings.get("STACONTROL_DEV") or "").lower() in {"1", "true", "yes"}
 _COOKIES_PASSWORD = settings.get("COOKIES_PASSWORD")
 
 if not _COOKIES_PASSWORD:
-    if _DEV:
-        # Gelistirmede her yeniden baslatmada oturumlar dusor; kabul edilebilir.
-        _COOKIES_PASSWORD = secrets.token_urlsafe(32)
-        print(
-            "[stacontrol] UYARI: COOKIES_PASSWORD yok, gelistirme icin gecici "
-            "anahtar uretildi.",
-            file=sys.stderr,
-        )
-    else:
-        _COOKIES_PASSWORD = settings.require("COOKIES_PASSWORD", settings.SECRETS_HINT)
+    # Anahtar tanimli degilse uygulamayi durdurmak yerine RASTGELE bir anahtar
+    # uretiyoruz. Onemli olan ayrim su:
+    #
+    #   * Sabit bir varsayilan (eski surumdeki "MySecretPassword123!") GUVENLIK
+    #     ACIGIDIR -- kaynak kodu goren herkes gecerli oturum cerezi uretebilir.
+    #   * Rastgele uretilen anahtar guvenlidir; tek maliyeti, surec her yeniden
+    #     basladiginda cerezlerin cozulememesi ve kullanicilarin yeniden giris
+    #     yapmasidir.
+    #
+    # Bu yuzden uyari son kullaniciya degil, yalnizca sunucu kayitlarina yazilir.
+    _COOKIES_PASSWORD = secrets.token_urlsafe(32)
+    print(
+        "[stacontrol] UYARI: COOKIES_PASSWORD tanimli degil. Gecici rastgele "
+        "anahtar uretildi; uygulama her yeniden baslatildiginda tum kullanicilar "
+        "cikis yapmis olacak. Kalici oturumlar icin bu degeri ortam degiskeni "
+        "ya da Streamlit secrets olarak tanimlayin.",
+        file=sys.stderr,
+    )
 
 # 1. Çerez Yöneticisini Başlatma
 cookies = EncryptedCookieManager(prefix="stacontrol/", password=_COOKIES_PASSWORD)
