@@ -15,16 +15,21 @@ import streamlit as st
 
 # --- streamlit-cookies-manager uyumluluk kalkani -----------------------------
 # streamlit_cookies_manager 0.2.0 (son surum, 2022'den beri guncellenmiyor)
-# ``@st.cache`` dekoratorunu kullanir. Streamlit bu API'yi kaldirdigi icin
-# paketin ICE AKTARILMASI bile AttributeError ile cokuyor ve tum sayfalar
-# birden dusuyor.
+# ``@st.cache`` dekoratorunu kullanir. Bu API:
+#   * yeni Streamlit surumlerinde KALDIRILDI -- paketin ice aktarilmasi bile
+#     AttributeError ile cokuyor ve tum sayfalar birden dusuyor;
+#   * hala var oldugu surumlerde ise kullaniciya ekranda "st.cache is
+#     deprecated" uyarisi bastiriyor.
 #
-# Kalkan, ice aktarmadan ONCE tanimlanmali. Paketin tek kullanimi
+# Kalkani kosulsuz uyguluyoruz: hem cokmeyi onler hem de eski API hic
+# cagrilmadigi icin uyari gorunmez. Paketin tek kullanimi
 # ``key_from_parameters(salt, iterations, password)`` -- deterministik ve
 # hashable argumanlar alip bytes donduren saf bir fonksiyon; ``st.cache_data``
-# ile davranissal olarak esdegerdir.
-if not hasattr(st, "cache"):  # pragma: no cover - surume bagli
-    st.cache = st.cache_data
+# ile davranissal olarak esdegerdir. Kendi kodumuzda ``st.cache`` kullanilmaz,
+# bu yuzden baska bir sey etkilenmez.
+#
+# Kalkan, paket ice aktarilmadan ONCE tanimlanmali.
+st.cache = st.cache_data
 
 from streamlit_cookies_manager import EncryptedCookieManager  # noqa: E402
 
