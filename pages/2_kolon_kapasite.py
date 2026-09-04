@@ -8,7 +8,7 @@ from database import save_hesaplama, get_hesaplama_by_id
 from utils import top_right_login, to_excel
 from session_config import init_session_state
 from constants import CONCRETE_OPTIONS
-from bridge_client import render_bridge_status
+from bridge_client import render_bridge_status, render_bridge_fetcher
 import etabs_service
 
 # Sayfa konfigürasyonu
@@ -27,7 +27,7 @@ top_right_login()
 
 st.title("Kolon Eksenel Kuvvet Kontrolü")
 
-# Canlı ETABS Durumu
+# Canlı ETABS Durumu (Tarayıcıdan sorgulanır, kombinasyonları ve katları yükler)
 render_bridge_status(key="kolon_bridge_status")
 
 tabs = st.tabs(["Hesaplama", "ℹ️"])
@@ -39,7 +39,7 @@ with tabs[0]:
     # AG Grid ayarları
     grid_options = {
         "columnDefs": [
-            {"headerName": "Kat", "field": "Story", "editable": True, "filter": "agSetColumnFilter", "maxWidth": 80, "minWidth": 80},
+            {"headerName": "Kat", "field": "Story", "editable": True, "filter": "agSetColumnFilter", "maxWidth": 90, "minWidth": 80},
             {"headerName": "Kolon", "field": "Column", "editable": True, "filter": "agSetColumnFilter"},
             {"headerName": "Kesit", "field": "SectProp", "editable": True, "filter": "agSetColumnFilter"},
             {"headerName": "Alan (m²)", "field": "Area", "editable": True, "filter": "agSetColumnFilter"},
@@ -126,70 +126,82 @@ with tabs[0]:
             if is_basement:
                 basement_dusey_combo = st.selectbox("Bodrum TS500 Kombinasyon", combo_names, key="basement_combo1")
                 basement_deprem_combo = st.selectbox("Bodrum TBDY2018 Kombinasyon", combo_names, key="basement_combo2")
-                # Kat seçenekleri
-                SapModel = etabs_service.get_active_sap_model()
-                story_options = []
-                if SapModel:
-                    try:
-                        ret_stories = SapModel.Story.GetNameList()
-                        story_options = list(ret_stories[1]) if ret_stories[0] > 0 else []
-                    except Exception:
-                        pass
+                
+                # Kat seçenekleri (Önce tarayıcıdan gelen session state, sonra service)
+                story_options = st.session_state.get("etabs_stories", [])
+                if not story_options:
+                    story_options = etabs_service.get_story_names()
+                
                 basement_stories = st.multiselect("Bodrum Katlarını Seçiniz", options=story_options, key="basement_stories")
 
         # Buton ile veri çekme
-        if st.button("Kontrol Et / Tabloyu Getir"):
-            with st.spinner("ETABS kolon verileri alınıyor..."):
+        if st.button("Kontrol Et / Tabloyu Getir", key="btn_run_kolon"):
+            st.session_state["fetching_kolon_active"] = True
+
+        if st.session_state.get("fetching_kolon_active"):
+            bundle = None
+            
+            # 1. Yerel masaüstü COM varsa doğrudan oradan al
+            SapModel = etabs_service.get_active_sap_model()
+            if SapModel:
                 bundle = etabs_service.get_column_bundle(combo=main_deprem_combo, ts500_combo=main_dusey_combo)
-                df_deprem = bundle.get("column_forces", pd.DataFrame())
-                df_dusey = bundle.get("ts500_forces", pd.DataFrame())
-                df_assign = bundle.get("frame_assignments", pd.DataFrame())
-                df_defs = bundle.get("section_definitions", pd.DataFrame())
+            else:
+                # 2. Web SaaS Modu: Tarayıcı üzerinden yerel köprüden doğrudan çek!
+                bundle = render_bridge_fetcher(
+                    endpoint="/api/column_bundle",
+                    params={"combo": main_deprem_combo, "ts500_combo": main_dusey_combo},
+                    bundle_name="column_bundle",
+                    key="kolon_bridge_fetcher_widget"
+                )
+
+            if bundle and isinstance(bundle, dict) and bundle.get("success"):
+                st.session_state["fetching_kolon_active"] = False
+                
+                df_deprem = pd.DataFrame(bundle.get("column_forces", []))
+                df_dusey = pd.DataFrame(bundle.get("ts500_forces", []))
+                df_assign = pd.DataFrame(bundle.get("frame_assignments", []))
+                df_defs = pd.DataFrame(bundle.get("section_definitions", []))
 
                 if df_dusey.empty or df_deprem.empty:
-                    st.error("ETABS'ten kolon verileri alınamadı. Lütfen ETABS'te kombinasyonların çözülmüş olduğundan ve STACONT Bridge'in çalıştığından emin olun.")
-                    st.stop()
-
-                df_dusey = df_dusey.rename(columns={'OutputCase': 'Düşey Kombinasyon', 'P': 'Düşey Yük'})
-                df_deprem = df_deprem.rename(columns={'OutputCase': 'Deprem Kombinasyonu', 'P': 'Deprem Yük'})
-                merged_df = pd.merge(df_dusey, df_deprem, on=['Story', 'Column'], how='left').sort_index().reset_index(drop=True)
-
-                if is_basement and 'basement_stories' in locals() and basement_stories:
-                    # Bodrum güncellemesi
-                    pass
-
-                # Kesit birleştirme
-                if 'DesignType' in df_assign.columns:
-                    df_assign = df_assign[df_assign['DesignType'] == 'Column']
-                
-                df_assign = df_assign.rename(columns={'FrameObjectName': 'Column', 'AutoSelect': 'SectProp'})
-                col_props = df_assign[['Story', 'Column', 'SectProp']].drop_duplicates()
-                merged_df = pd.merge(merged_df, col_props, on=['Story', 'Column'], how='left')
-
-                # Kesit alanları
-                if 'Name' in df_defs.columns and 'Area' in df_defs.columns:
-                    df_defs_clean = df_defs.rename(columns={'Name': 'SectProp'})[['SectProp', 'Area']].drop_duplicates()
-                    merged_df = pd.merge(merged_df, df_defs_clean, on='SectProp', how='left')
+                    st.error("ETABS'ten kolon kuvvetleri alınamadı. Lütfen analiz modelinizi (F5) çözdürdüğünüzden emin olun.")
                 else:
-                    merged_df['Area'] = 0.25
+                    df_dusey = df_dusey.rename(columns={'OutputCase': 'Düşey Kombinasyon', 'P': 'Düşey Yük'})
+                    df_deprem = df_deprem.rename(columns={'OutputCase': 'Deprem Kombinasyonu', 'P': 'Deprem Yük'})
+                    merged_df = pd.merge(df_dusey, df_deprem, on=['Story', 'Column'], how='left').sort_index().reset_index(drop=True)
 
-                merged_df['Beton Sınıfı'] = selected_concrete
-                merged_df['fck'] = concrete_value
-                merged_df['fcd'] = concrete_value / 1.5
-                merged_df['Ac'] = pd.to_numeric(merged_df['Area'], errors='coerce')
-                merged_df['Düşey Yük'] = pd.to_numeric(merged_df['Düşey Yük'], errors='coerce')
-                merged_df['Deprem Yük'] = pd.to_numeric(merged_df['Deprem Yük'], errors='coerce')
+                    # Kesit birleştirme
+                    if not df_assign.empty:
+                        if 'DesignType' in df_assign.columns:
+                            df_assign = df_assign[df_assign['DesignType'] == 'Column']
+                        df_assign = df_assign.rename(columns={'FrameObjectName': 'Column', 'AutoSelect': 'SectProp'})
+                        col_props = df_assign[['Story', 'Column', 'SectProp']].drop_duplicates()
+                        merged_df = pd.merge(merged_df, col_props, on=['Story', 'Column'], how='left')
 
-                # Hesaplamalar
-                merged_df['TS500_Hesap'] = 0.9 * merged_df['fcd'] * merged_df['Ac']
-                merged_df['%Nd/MaxNd'] = (merged_df['Düşey Yük'].abs() / merged_df['TS500_Hesap'].replace(0, 1) * 100).round(1).astype(str) + '%'
-                merged_df['TS500_Durum'] = np.where(merged_df['Düşey Yük'].abs() < merged_df['TS500_Hesap'], '✅', '❌')
+                    # Kesit alanları
+                    if not df_defs.empty and 'Name' in df_defs.columns and 'Area' in df_defs.columns:
+                        df_defs_clean = df_defs.rename(columns={'Name': 'SectProp'})[['SectProp', 'Area']].drop_duplicates()
+                        merged_df = pd.merge(merged_df, df_defs_clean, on='SectProp', how='left')
+                    else:
+                        merged_df['Area'] = 0.25
 
-                merged_df['TBDY_Hesap'] = 0.4 * merged_df['fck'] * merged_df['Ac']
-                merged_df['%Ndm/MaxNdm'] = (merged_df['Deprem Yük'].abs() / merged_df['TBDY_Hesap'].replace(0, 1) * 100).round(1).astype(str) + '%'
-                merged_df['TBDY_Durum'] = np.where(merged_df['Deprem Yük'].abs() < merged_df['TBDY_Hesap'], '✅', '❌')
+                    merged_df['Beton Sınıfı'] = selected_concrete
+                    merged_df['fck'] = concrete_value
+                    merged_df['fcd'] = concrete_value / 1.5
+                    merged_df['Ac'] = pd.to_numeric(merged_df['Area'], errors='coerce')
+                    merged_df['Düşey Yük'] = pd.to_numeric(merged_df['Düşey Yük'], errors='coerce')
+                    merged_df['Deprem Yük'] = pd.to_numeric(merged_df['Deprem Yük'], errors='coerce')
 
-                st.session_state["kolon_final_table"] = merged_df
+                    # Hesaplamalar
+                    merged_df['TS500_Hesap'] = 0.9 * merged_df['fcd'] * merged_df['Ac']
+                    merged_df['%Nd/MaxNd'] = (merged_df['Düşey Yük'].abs() / merged_df['TS500_Hesap'].replace(0, 1) * 100).round(1).astype(str) + '%'
+                    merged_df['TS500_Durum'] = np.where(merged_df['Düşey Yük'].abs() < merged_df['TS500_Hesap'], '✅', '❌')
+
+                    merged_df['TBDY_Hesap'] = 0.4 * merged_df['fck'] * merged_df['Ac']
+                    merged_df['%Ndm/MaxNdm'] = (merged_df['Deprem Yük'].abs() / merged_df['TBDY_Hesap'].replace(0, 1) * 100).round(1).astype(str) + '%'
+                    merged_df['TBDY_Durum'] = np.where(merged_df['Deprem Yük'].abs() < merged_df['TBDY_Hesap'], '✅', '❌')
+
+                    st.session_state["kolon_final_table"] = merged_df
+                    st.rerun()
 
         if "kolon_final_table" in st.session_state:
             disp_df = st.session_state["kolon_final_table"]

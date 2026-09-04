@@ -12,7 +12,7 @@ else:
 def render_bridge_status(key="etabs_bridge_status_widget"):
     """
     Kullanıcının tarayıcısından yerel http://127.0.0.1:8765 adresini sorgular.
-    Durumu ekranda gösterir, tünel adresini kalıcı olarak oturuma ve query param'a kaydeder.
+    Durumu ekranda gösterir; model adını, kombinasyonları, yük durumlarını ve katları kaydeder.
     """
     if _bridge_component is None:
         return None
@@ -26,21 +26,27 @@ def render_bridge_status(key="etabs_bridge_status_widget"):
             tunnel = res.get("tunnel_url")
             if tunnel:
                 st.session_state["bridge_url"] = tunnel
-                try:
-                    st.query_params["bridge"] = tunnel
-                except Exception:
-                    pass
 
             if res.get("combinations"):
                 st.session_state["etabs_combinations"] = res.get("combinations", [])
             if res.get("load_cases"):
                 st.session_state["etabs_load_cases"] = res.get("load_cases", [])
+            if res.get("stories"):
+                st.session_state["etabs_stories"] = res.get("stories", [])
             st.session_state["etabs_info"] = res
         else:
-            if not st.session_state.get("bridge_url"):
-                st.session_state["etabs_connected"] = False
+            st.session_state["etabs_connected"] = False
     return res
 
+def render_bridge_fetcher(endpoint: str, params: dict = None, bundle_name: str = "bundle", key: str = "bridge_fetcher"):
+    """
+    Kullanıcının tarayıcısı üzerinden yerel 127.0.0.1:8765 adresinden tablo verisi çeker.
+    Bulut kısıtlamalarını ve Cloudflare 530 hatalarını tamamen aşar.
+    """
+    if _bridge_component is None:
+        return None
+    return _bridge_component(action="fetch_bundle", endpoint=endpoint, params=params or {}, bundle_name=bundle_name, key=key)
+
 def fetch_bundle(*args, **kwargs):
-    """Geriye dönük uyumluluk için yardımcı fonksiyon."""
-    return None
+    """Geriye dönük uyumluluk."""
+    return render_bridge_fetcher(*args, **kwargs)

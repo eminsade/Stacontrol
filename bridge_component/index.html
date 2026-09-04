@@ -101,6 +101,12 @@
       const params = args.params || {};
 
       if (action === "fetch_bundle") {
+        const box = document.getElementById("status-box");
+        box.innerHTML = `
+          <div style="color: #2563eb; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; padding: 6px 12px; font-size: 13px; display: inline-flex; align-items: center; gap: 8px;">
+            <span class="pulse pulse-blue"></span> <b>ETABS'ten veriler alınıyor...</b>
+          </div>`;
+        setHeight(40);
         const res = await queryBridge(endpoint, params);
         sendToStreamlit({ bundle_action: args.bundle_name, ...res });
         return;
@@ -117,14 +123,16 @@
             <b>ETABS Bağlandı:</b> ${result.model_name || 'Aktif Model'}
           </div>`;
         
-        // Kombinasyonları ve Yük durumlarını da çek
+        // Kombinasyonları, Yük durumlarını ve Katları çek
         const combosRes = await queryBridge("/api/combinations");
         const casesRes = await queryBridge("/api/load_cases");
+        const storiesRes = await queryBridge("/api/stories");
 
         const fullData = {
           ...result,
           combinations: (combosRes && combosRes.combinations) ? combosRes.combinations : [],
-          load_cases: (casesRes && casesRes.load_cases) ? casesRes.load_cases : []
+          load_cases: (casesRes && casesRes.load_cases) ? casesRes.load_cases : [],
+          stories: (storiesRes && storiesRes.stories) ? storiesRes.stories : []
         };
         sendToStreamlit(fullData);
       } else if (result && result.status === "disconnected" && result.error && result.error.includes("ETABS")) {

@@ -176,8 +176,13 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
 
             # 4. Kat Isimleri (Stories)
             elif path == "/api/stories":
-                ret_stories = SapModel.Story.GetNameList()
-                stories = list(ret_stories[1]) if ret_stories[0] > 0 else []
+                df_stories = get_table_df(SapModel, 'Story Definitions')
+                stories = []
+                if not df_stories.empty and 'Story' in df_stories.columns:
+                    stories = list(df_stories['Story'].dropna().unique())
+                else:
+                    ret_stories = SapModel.Story.GetNameList()
+                    stories = list(ret_stories[1]) if ret_stories[0] > 0 else []
                 self._send_json({"success": True, "stories": stories})
 
             # 5. Perde Kesme / Kapasite Paketi (Pier Bundle)
