@@ -264,15 +264,17 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
 def run_server():
     server_address = (HOST, PORT)
     httpd = ThreadingHTTPServer(server_address, BridgeRequestHandler)
+    
+    # Cloudflare HTTPS tünelini sunucu başlamadan önce hazırla
+    start_tunnel_async()
+
     print("=" * 60)
     print("STACONT Bridge Agent Baslatildi!")
-    print(f"Adres: http://{HOST}:{PORT}")
+    print(f"Lokal Adres: http://{HOST}:{PORT}")
+    if TUNNEL_URL:
+        print(f"Bulut Tunel Adresi: {TUNNEL_URL}")
     print("STACONT web arayuzu acikken bu pencereyi acik tutun.")
     print("=" * 60)
-    
-    # Arka planda Cloudflare HTTPS tuneli baslat
-    t_thread = threading.Thread(target=start_tunnel_async, daemon=True)
-    t_thread.start()
 
     try:
         httpd.serve_forever()
