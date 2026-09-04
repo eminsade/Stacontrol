@@ -182,11 +182,18 @@ if not st.session_state.get("etabs_connected", False):
         3. Sayfayı yenileyin; yukarıdaki durum **🟢 ETABS Bağlandı** olarak güncellenecektir!
         """)
         
-        bridge_py_path = os.path.join(os.path.dirname(__file__), "bridge_agent.py")
-        bridge_bat_path = os.path.join(os.path.dirname(__file__), "STACONT_Bridge_Baslat.bat")
-        
-        col_d1, col_d2 = st.columns(2)
-        with col_d1:
+        zip_path = os.path.join(os.path.dirname(__file__), "STACONT_Bridge.zip")
+        if os.path.exists(zip_path):
+            with open(zip_path, "rb") as f:
+                st.download_button(
+                    label="📦 STACONT Bridge Paketini İndir (.zip)",
+                    data=f.read(),
+                    file_name="STACONT_Bridge.zip",
+                    mime="application/zip",
+                    use_container_width=True
+                )
+        else:
+            bridge_py_path = os.path.join(os.path.dirname(__file__), "bridge_agent.py")
             if os.path.exists(bridge_py_path):
                 with open(bridge_py_path, "r", encoding="utf-8") as f:
                     st.download_button(
@@ -194,16 +201,6 @@ if not st.session_state.get("etabs_connected", False):
                         data=f.read(),
                         file_name="bridge_agent.py",
                         mime="text/x-python",
-                        use_container_width=True
-                    )
-        with col_d2:
-            if os.path.exists(bridge_bat_path):
-                with open(bridge_bat_path, "r", encoding="utf-8") as f:
-                    st.download_button(
-                        label="📥 Tek Tıkla Başlatıcı (.bat) İndir",
-                        data=f.read(),
-                        file_name="STACONT_Bridge_Baslat.bat",
-                        mime="application/x-bat",
                         use_container_width=True
                     )
 
