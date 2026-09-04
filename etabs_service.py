@@ -204,7 +204,7 @@ def get_story_names() -> list:
     return []
 
 
-def get_column_bundle(combo: str, ts500_combo: str = "") -> dict:
+def get_column_bundle(combo: str, ts500_combo: str = "", basement_combo: str = "", basement_ts500_combo: str = "") -> dict:
     """Kolon kapasite hesabı için gerekli tüm tabloları tek seferde döndürür."""
     # 1. Doğrudan COM (Masaüstü Modu - En Hızlı)
     SapModel = get_active_sap_model()
@@ -215,7 +215,7 @@ def get_column_bundle(combo: str, ts500_combo: str = "") -> dict:
                     return pd.DataFrame()
                 SapModel.DatabaseTables.SetLoadCasesSelectedForDisplay([c])
                 SapModel.DatabaseTables.SetLoadCombinationsSelectedForDisplay([c])
-                SapModel.DatabaseTables.SetLoadPatternsSelectedForDisplay([c])
+                SapModel.DatabaseTables.SetLoadPatternsSelectedForDisplay([])
                 ret = SapModel.DatabaseTables.GetTableForDisplayArray('Element Forces - Columns', [], 'All', 1, [], 0, [])
                 if not ret[2]:
                     return pd.DataFrame()
@@ -234,7 +234,13 @@ def get_column_bundle(combo: str, ts500_combo: str = "") -> dict:
                 cols = [col.strip() for col in ret[2]]
                 raw = ret[4]
                 rows = [raw[i:i + len(cols)] for i in range(0, len(raw), len(cols))]
-                return pd.DataFrame(rows, columns=cols).apply(lambda x: x.str.strip() if x.dtype == "object" else x)
+                df_a = pd.DataFrame(rows, columns=cols).apply(lambda x: x.str.strip() if x.dtype == "object" else x)
+                col_col = next((c for c in ['Column', 'FrameObjectName', 'Label', 'Frame'] if c in df_a.columns), None)
+                if col_col and col_col != 'Column':
+                    df_a['Column'] = df_a[col_col]
+                if 'SectProp' not in df_a.columns and 'AutoSelect' in df_a.columns:
+                    df_a['SectProp'] = df_a['AutoSelect']
+                return df_a
 
             def _get_defs():
                 ret = SapModel.DatabaseTables.GetTableForDisplayArray('Frame Section Property Definitions - Summary', [], 'All', 1, [], 0, [])
@@ -250,6 +256,8 @@ def get_column_bundle(combo: str, ts500_combo: str = "") -> dict:
             return {
                 "column_forces": _get_forces(combo),
                 "ts500_forces": _get_forces(ts500_combo) if ts500_combo else pd.DataFrame(),
+                "basement_column_forces": _get_forces(basement_combo) if basement_combo else pd.DataFrame(),
+                "basement_ts500_forces": _get_forces(basement_ts500_combo) if basement_ts500_combo else pd.DataFrame(),
                 "frame_assignments": _get_assign(),
                 "section_definitions": _get_defs()
             }
@@ -258,21 +266,35 @@ def get_column_bundle(combo: str, ts500_combo: str = "") -> dict:
 
     # 2. Bridge (Web / Bulut Modu)
     try:
-        resp = _fetch_from_bridge("/api/column_bundle", params={"combo": combo, "ts500_combo": ts500_combo}, timeout=30.0)
+        resp = _fetch_from_bridge("/api/column_bundle", params={
+            "combo": combo, 
+            "ts500_combo": ts500_combo,
+            "basement_combo": basement_combo,
+            "basement_ts500_combo": basement_ts500_combo
+        }, timeout=30.0)
         if resp and resp.get("success"):
             return {
                 "column_forces": pd.DataFrame(resp.get("column_forces", [])),
                 "ts500_forces": pd.DataFrame(resp.get("ts500_forces", [])),
+                "basement_column_forces": pd.DataFrame(resp.get("basement_column_forces", [])),
+                "basement_ts500_forces": pd.DataFrame(resp.get("basement_ts500_forces", [])),
                 "frame_assignments": pd.DataFrame(resp.get("frame_assignments", [])),
                 "section_definitions": pd.DataFrame(resp.get("section_definitions", []))
             }
     except Exception as e:
         print(f"Bridge kolon paketi hatası: {e}")
 
-    return {"column_forces": pd.DataFrame(), "ts500_forces": pd.DataFrame(), "frame_assignments": pd.DataFrame(), "section_definitions": pd.DataFrame()}
+    return {
+        "column_forces": pd.DataFrame(),
+        "ts500_forces": pd.DataFrame(),
+        "basement_column_forces": pd.DataFrame(),
+        "basement_ts500_forces": pd.DataFrame(),
+        "frame_assignments": pd.DataFrame(),
+        "section_definitions": pd.DataFrame()
+    }
 
 
-def get_pier_bundle(combo: str) -> dict:
+def get_pier_bundle(combo: str, basement_combo: str = "") -> dict:
     """Perde hesabı için gerekli tabloları döndürür."""
     # 1. Doğrudan COM
     SapModel = get_active_sap_model()
@@ -283,31 +305,137 @@ def get_pier_bundle(combo: str) -> dict:
             raw_p = ret_p[4] if ret_p[2] else []
             df_props = pd.DataFrame([raw_p[i:i + len(cols_p)] for i in range(0, len(raw_p), len(cols_p))], columns=cols_p) if cols_p else pd.DataFrame()
 
-            SapModel.DatabaseTables.SetLoadCasesSelectedForDisplay([combo])
-            SapModel.DatabaseTables.SetLoadCombinationsSelectedForDisplay([combo])
-            SapModel.DatabaseTables.SetLoadPatternsSelectedForDisplay([combo])
-            ret_f = SapModel.DatabaseTables.GetTableForDisplayArray('Pier Forces', [], 'All', 1, [], 0, [])
-            cols_f = [c.strip() for c in ret_f[2]] if ret_f[2] else []
-            raw_f = ret_f[4] if ret_f[2] else []
-            df_forces = pd.DataFrame([raw_f[i:i + len(cols_f)] for i in range(0, len(raw_f), len(cols_f))], columns=cols_f) if cols_f else pd.DataFrame()
-            if not df_forces.empty and 'V2' in df_forces.columns:
-                df_forces['V2'] = pd.to_numeric(df_forces['V2'], errors='coerce')
-                max_idx = df_forces.groupby(['Story', 'Pier'])['V2'].apply(lambda x: x.abs().idxmax())
-                df_forces = df_forces.loc[max_idx].sort_index().reset_index(drop=True)[['Story', 'Pier', 'OutputCase', 'V2']]
+            def _get_pier_forces(c):
+                if not c:
+                    return pd.DataFrame()
+                SapModel.DatabaseTables.SetLoadCasesSelectedForDisplay([c])
+                SapModel.DatabaseTables.SetLoadCombinationsSelectedForDisplay([c])
+                SapModel.DatabaseTables.SetLoadPatternsSelectedForDisplay([])
+                ret_f = SapModel.DatabaseTables.GetTableForDisplayArray('Pier Forces', [], 'All', 1, [], 0, [])
+                cols_f = [col.strip() for col in ret_f[2]] if ret_f[2] else []
+                raw_f = ret_f[4] if ret_f[2] else []
+                df_f = pd.DataFrame([raw_f[i:i + len(cols_f)] for i in range(0, len(raw_f), len(cols_f))], columns=cols_f) if cols_f else pd.DataFrame()
+                if not df_f.empty and 'V2' in df_f.columns:
+                    df_f['V2'] = pd.to_numeric(df_f['V2'], errors='coerce')
+                    max_idx = df_f.groupby(['Story', 'Pier'])['V2'].apply(lambda x: x.abs().idxmax())
+                    return df_f.loc[max_idx].sort_index().reset_index(drop=True)[['Story', 'Pier', 'OutputCase', 'V2', 'P']]
+                return pd.DataFrame()
 
-            return {"pier_section": df_props, "pier_forces": df_forces}
+            return {
+                "pier_section": df_props,
+                "pier_forces": _get_pier_forces(combo),
+                "basement_forces": _get_pier_forces(basement_combo) if basement_combo else pd.DataFrame()
+            }
         except Exception:
             pass
 
     # 2. Bridge
     try:
-        resp = _fetch_from_bridge("/api/pier_bundle", params={"combo": combo}, timeout=30.0)
+        resp = _fetch_from_bridge("/api/pier_bundle", params={"combo": combo, "basement_combo": basement_combo}, timeout=30.0)
         if resp and resp.get("success"):
             return {
                 "pier_section": pd.DataFrame(resp.get("pier_section", [])),
-                "pier_forces": pd.DataFrame(resp.get("pier_forces", []))
+                "pier_forces": pd.DataFrame(resp.get("pier_forces", [])),
+                "basement_forces": pd.DataFrame(resp.get("basement_forces", []))
             }
     except Exception:
         pass
 
-    return {"pier_section": pd.DataFrame(), "pier_forces": pd.DataFrame()}
+    return {"pier_section": pd.DataFrame(), "pier_forces": pd.DataFrame(), "basement_forces": pd.DataFrame()}
+
+
+def get_beam_bundle(combo: str) -> dict:
+    """Kiriş kesme hesabı için gerekli tabloları döndürür."""
+    # 1. Doğrudan COM
+    SapModel = get_active_sap_model()
+    if SapModel is not None:
+        try:
+            SapModel.DatabaseTables.SetLoadCasesSelectedForDisplay([combo])
+            SapModel.DatabaseTables.SetLoadCombinationsSelectedForDisplay([combo])
+            SapModel.DatabaseTables.SetLoadPatternsSelectedForDisplay([])
+            ret_b = SapModel.DatabaseTables.GetTableForDisplayArray('Element Forces - Beams', [], 'All', 1, [], 0, [])
+            cols_b = [col.strip() for col in ret_b[2]] if ret_b[2] else []
+            raw_b = ret_b[4] if ret_b[2] else []
+            df_b = pd.DataFrame([raw_b[i:i + len(cols_b)] for i in range(0, len(raw_b), len(cols_b))], columns=cols_b) if cols_b else pd.DataFrame()
+            if not df_b.empty and 'V2' in df_b.columns:
+                df_b['V2'] = pd.to_numeric(df_b['V2'], errors='coerce')
+                max_idx = df_b.groupby(['Story', 'Beam'], sort=False)['V2'].apply(lambda x: x.abs().idxmax())
+                df_b = df_b.loc[max_idx].sort_index().reset_index(drop=True)[['Story', 'Beam', 'OutputCase', 'V2']]
+
+            ret_a = SapModel.DatabaseTables.GetTableForDisplayArray('Frame Assignments - Section Properties', [], 'All', 1, [], 0, [])
+            cols_a = [col.strip() for col in ret_a[2]] if ret_a[2] else []
+            raw_a = ret_a[4] if ret_a[2] else []
+            df_a = pd.DataFrame([raw_a[i:i + len(cols_a)] for i in range(0, len(raw_a), len(cols_a))], columns=cols_a) if cols_a else pd.DataFrame()
+            if not df_a.empty:
+                beam_col = next((c for c in ['Beam', 'FrameObjectName', 'Label', 'Frame'] if c in df_a.columns), None)
+                if beam_col and beam_col != 'Beam':
+                    df_a['Beam'] = df_a[beam_col]
+                if 'SectProp' not in df_a.columns and 'AutoSelect' in df_a.columns:
+                    df_a['SectProp'] = df_a['AutoSelect']
+
+            ret_d = SapModel.DatabaseTables.GetTableForDisplayArray('Frame Section Property Definitions - Concrete Rectangular', [], 'All', 1, [], 0, [])
+            cols_d = [col.strip() for col in ret_d[2]] if ret_d[2] else []
+            raw_d = ret_d[4] if ret_d[2] else []
+            df_d = pd.DataFrame([raw_d[i:i + len(cols_d)] for i in range(0, len(raw_d), len(cols_d))], columns=cols_d) if cols_d else pd.DataFrame()
+
+            return {
+                "beam_forces": df_b,
+                "frame_assignments": df_a,
+                "section_definitions": df_d
+            }
+        except Exception:
+            pass
+
+    # 2. Bridge
+    try:
+        resp = _fetch_from_bridge("/api/beam_bundle", params={"combo": combo}, timeout=30.0)
+        if resp and resp.get("success"):
+            return {
+                "beam_forces": pd.DataFrame(resp.get("beam_forces", [])),
+                "frame_assignments": pd.DataFrame(resp.get("frame_assignments", [])),
+                "section_definitions": pd.DataFrame(resp.get("section_definitions", []))
+            }
+    except Exception:
+        pass
+
+    return {"beam_forces": pd.DataFrame(), "frame_assignments": pd.DataFrame(), "section_definitions": pd.DataFrame()}
+
+
+def get_drift_bundle(case_x: str, case_y: str) -> dict:
+    """Göreli kat ötelemesi için gerekli tabloları döndürür."""
+    # 1. Doğrudan COM
+    SapModel = get_active_sap_model()
+    if SapModel is not None:
+        try:
+            cases = [c for c in list(dict.fromkeys([case_x, case_y])) if c]
+            SapModel.DatabaseTables.SetLoadCasesSelectedForDisplay(cases)
+            SapModel.DatabaseTables.SetLoadCombinationsSelectedForDisplay([])
+            SapModel.DatabaseTables.SetLoadPatternsSelectedForDisplay([])
+
+            ret_d = SapModel.DatabaseTables.GetTableForDisplayArray('Story Drifts', [], 'All', 1, [], 0, [])
+            cols_d = [col.strip() for col in ret_d[2]] if ret_d[2] else []
+            raw_d = ret_d[4] if ret_d[2] else []
+            df_d = pd.DataFrame([raw_d[i:i + len(cols_d)] for i in range(0, len(raw_d), len(cols_d))], columns=cols_d) if cols_d else pd.DataFrame()
+
+            SapModel.DatabaseTables.SetLoadCasesSelectedForDisplay([])
+            ret_m = SapModel.DatabaseTables.GetTableForDisplayArray('Modal Participating Mass Ratios', [], 'All', 1, [], 0, [])
+            cols_m = [col.strip() for col in ret_m[2]] if ret_m[2] else []
+            raw_m = ret_m[4] if ret_m[2] else []
+            df_m = pd.DataFrame([raw_m[i:i + len(cols_m)] for i in range(0, len(raw_m), len(cols_m))], columns=cols_m) if cols_m else pd.DataFrame()
+
+            return {"story_drifts": df_d, "modal_ratios": df_m}
+        except Exception:
+            pass
+
+    # 2. Bridge
+    try:
+        resp = _fetch_from_bridge("/api/drift_bundle", params={"case_x": case_x, "case_y": case_y}, timeout=30.0)
+        if resp and resp.get("success"):
+            return {
+                "story_drifts": pd.DataFrame(resp.get("story_drifts", [])),
+                "modal_ratios": pd.DataFrame(resp.get("modal_ratios", []))
+            }
+    except Exception:
+        pass
+
+    return {"story_drifts": pd.DataFrame(), "modal_ratios": pd.DataFrame()}

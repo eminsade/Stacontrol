@@ -128,11 +128,17 @@ with tabs[0]:
             bundle = None
             SapModel = etabs_service.get_active_sap_model()
             if SapModel:
-                bundle = etabs_service.get_pier_bundle(main_deprem_combo)
+                bundle = etabs_service.get_pier_bundle(
+                    combo=main_deprem_combo,
+                    basement_combo=basement_deprem_combo if is_basement else ""
+                )
             else:
                 bundle = render_bridge_fetcher(
                     endpoint="/api/pier_bundle",
-                    params={"combo": main_deprem_combo},
+                    params={
+                        "combo": main_deprem_combo,
+                        "basement_combo": basement_deprem_combo if is_basement else ""
+                    },
                     bundle_name="pier_bundle",
                     key="perde_bridge_fetcher_widget"
                 )
@@ -141,6 +147,7 @@ with tabs[0]:
                 st.session_state["fetching_perde_active"] = False
                 df_deprem = pd.DataFrame(bundle.get("pier_forces", []))
                 df_pier_section = pd.DataFrame(bundle.get("pier_section", []))
+                df_bodrum = pd.DataFrame(bundle.get("basement_forces", []))
 
                 if df_deprem.empty or df_pier_section.empty:
                     st.error("ETABS'ten perde verileri alınamadı. Modelinizin analiz edildiğinden emin olun.")
@@ -148,16 +155,13 @@ with tabs[0]:
                     df_deprem = df_deprem.rename(columns={'OutputCase': 'Deprem Kombinasyonu', 'P': 'Deprem Yük'})
                     merged_df = df_deprem
 
-                    if is_basement and 'basement_stories' in locals() and basement_stories:
-                        bundle_b = etabs_service.get_pier_bundle(basement_deprem_combo)
-                        df_bodrum = bundle_b.get("pier_forces", pd.DataFrame())
-                        if not df_bodrum.empty:
-                            df_bodrum = df_bodrum[df_bodrum["Story"].isin(basement_stories)]
-                            df_bodrum = df_bodrum.rename(columns={'OutputCase': 'Bodrum Deprem Kombinasyon', 'P': 'Bodrum Deprem Yük'})
-                            merged_df = pd.merge(merged_df, df_bodrum, on=['Story', 'Pier'], how='left')
-                            merged_df['Deprem Kombinasyonu'] = merged_df['Bodrum Deprem Kombinasyon'].combine_first(merged_df['Deprem Kombinasyonu'])
-                            merged_df['Deprem Yük'] = merged_df['Bodrum Deprem Yük'].combine_first(merged_df['Deprem Yük'])
-                            merged_df = merged_df.drop(columns=['Bodrum Deprem Kombinasyon', 'Bodrum Deprem Yük'])
+                    if is_basement and 'basement_stories' in locals() and basement_stories and not df_bodrum.empty:
+                        df_bodrum_sub = df_bodrum[df_bodrum["Story"].isin(basement_stories)].copy()
+                        df_bodrum_sub = df_bodrum_sub.rename(columns={'OutputCase': 'Bodrum Deprem Kombinasyon', 'P': 'Bodrum Deprem Yük'})
+                        merged_df = pd.merge(merged_df, df_bodrum_sub, on=['Story', 'Pier'], how='left')
+                        merged_df['Deprem Kombinasyonu'] = merged_df['Bodrum Deprem Kombinasyon'].combine_first(merged_df['Deprem Kombinasyonu'])
+                        merged_df['Deprem Yük'] = merged_df['Bodrum Deprem Yük'].combine_first(merged_df['Deprem Yük'])
+                        merged_df = merged_df.drop(columns=['Bodrum Deprem Kombinasyon', 'Bodrum Deprem Yük'], errors='ignore')
 
                     merged_df = pd.merge(merged_df, df_pier_section[['Story', 'Pier', 'WidthBot', 'ThickBot']], on=['Story', 'Pier'], how='left')
                     merged_df['Beton Sınıfı'] = selected_concrete

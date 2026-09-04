@@ -144,12 +144,22 @@ with tabs[0]:
             # 1. Yerel masaüstü COM varsa doğrudan oradan al
             SapModel = etabs_service.get_active_sap_model()
             if SapModel:
-                bundle = etabs_service.get_column_bundle(combo=main_deprem_combo, ts500_combo=main_dusey_combo)
+                bundle = etabs_service.get_column_bundle(
+                    combo=main_deprem_combo, 
+                    ts500_combo=main_dusey_combo,
+                    basement_combo=basement_deprem_combo if is_basement else "",
+                    basement_ts500_combo=basement_dusey_combo if is_basement else ""
+                )
             else:
                 # 2. Web SaaS Modu: Tarayıcı üzerinden yerel köprüden doğrudan çek!
                 bundle = render_bridge_fetcher(
                     endpoint="/api/column_bundle",
-                    params={"combo": main_deprem_combo, "ts500_combo": main_dusey_combo},
+                    params={
+                        "combo": main_deprem_combo, 
+                        "ts500_combo": main_dusey_combo,
+                        "basement_combo": basement_deprem_combo if is_basement else "",
+                        "basement_ts500_combo": basement_dusey_combo if is_basement else ""
+                    },
                     bundle_name="column_bundle",
                     key="kolon_bridge_fetcher_widget"
                 )
@@ -161,6 +171,8 @@ with tabs[0]:
                 df_dusey = pd.DataFrame(bundle.get("ts500_forces", []))
                 df_assign = pd.DataFrame(bundle.get("frame_assignments", []))
                 df_defs = pd.DataFrame(bundle.get("section_definitions", []))
+                df_b_deprem = pd.DataFrame(bundle.get("basement_column_forces", []))
+                df_b_dusey = pd.DataFrame(bundle.get("basement_ts500_forces", []))
 
                 if df_dusey.empty or df_deprem.empty:
                     st.error("ETABS'ten kolon kuvvetleri alınamadı. Lütfen analiz modelinizi (F5) çözdürdüğünüzden emin olun.")
@@ -169,11 +181,31 @@ with tabs[0]:
                     df_deprem = df_deprem.rename(columns={'OutputCase': 'Deprem Kombinasyonu', 'P': 'Deprem Yük'})
                     merged_df = pd.merge(df_dusey, df_deprem, on=['Story', 'Column'], how='left').sort_index().reset_index(drop=True)
 
+                    # Bodrum katları seçildiyse ilgili katları bodrum kombinasyonlarıyla güncelle
+                    if is_basement and 'basement_stories' in locals() and basement_stories:
+                        if not df_b_dusey.empty and 'Story' in df_b_dusey.columns:
+                            df_b_dusey_sub = df_b_dusey[df_b_dusey["Story"].isin(basement_stories)].copy()
+                            df_b_dusey_sub = df_b_dusey_sub.rename(columns={'OutputCase': 'Bodrum Düşey Kombinasyon', 'P': 'Bodrum Düşey Yük'})
+                            merged_df = pd.merge(merged_df, df_b_dusey_sub, on=['Story', 'Column'], how='left')
+                            merged_df['Düşey Kombinasyon'] = merged_df['Bodrum Düşey Kombinasyon'].combine_first(merged_df['Düşey Kombinasyon'])
+                            merged_df['Düşey Yük'] = merged_df['Bodrum Düşey Yük'].combine_first(merged_df['Düşey Yük'])
+                            merged_df = merged_df.drop(columns=['Bodrum Düşey Kombinasyon', 'Bodrum Düşey Yük'], errors='ignore')
+
+                        if not df_b_deprem.empty and 'Story' in df_b_deprem.columns:
+                            df_b_deprem_sub = df_b_deprem[df_b_deprem["Story"].isin(basement_stories)].copy()
+                            df_b_deprem_sub = df_b_deprem_sub.rename(columns={'OutputCase': 'Bodrum Deprem Kombinasyon', 'P': 'Bodrum Deprem Yük'})
+                            merged_df = pd.merge(merged_df, df_b_deprem_sub, on=['Story', 'Column'], how='left')
+                            merged_df['Deprem Kombinasyonu'] = merged_df['Bodrum Deprem Kombinasyon'].combine_first(merged_df['Deprem Kombinasyonu'])
+                            merged_df['Deprem Yük'] = merged_df['Bodrum Deprem Yük'].combine_first(merged_df['Deprem Yük'])
+                            merged_df = merged_df.drop(columns=['Bodrum Deprem Kombinasyon', 'Bodrum Deprem Yük'], errors='ignore')
+
                     # Kesit birleştirme
                     if not df_assign.empty:
-                        if 'DesignType' in df_assign.columns:
-                            df_assign = df_assign[df_assign['DesignType'] == 'Column']
-                        df_assign = df_assign.rename(columns={'FrameObjectName': 'Column', 'AutoSelect': 'SectProp'})
+                        col_col = next((c for c in ['Column', 'FrameObjectName', 'Label', 'Frame'] if c in df_assign.columns), None)
+                        if col_col and col_col != 'Column':
+                            df_assign['Column'] = df_assign[col_col]
+                        if 'SectProp' not in df_assign.columns and 'AutoSelect' in df_assign.columns:
+                            df_assign['SectProp'] = df_assign['AutoSelect']
                         col_props = df_assign[['Story', 'Column', 'SectProp']].drop_duplicates()
                         merged_df = pd.merge(merged_df, col_props, on=['Story', 'Column'], how='left')
 
@@ -187,7 +219,7 @@ with tabs[0]:
                     merged_df['Beton Sınıfı'] = selected_concrete
                     merged_df['fck'] = concrete_value
                     merged_df['fcd'] = concrete_value / 1.5
-                    merged_df['Ac'] = pd.to_numeric(merged_df['Area'], errors='coerce')
+                    merged_df['Ac'] = pd.to_numeric(merged_df['Area'], errors='coerce').fillna(0.25)
                     merged_df['Düşey Yük'] = pd.to_numeric(merged_df['Düşey Yük'], errors='coerce')
                     merged_df['Deprem Yük'] = pd.to_numeric(merged_df['Deprem Yük'], errors='coerce')
 

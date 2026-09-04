@@ -17,6 +17,7 @@ from database import save_hesaplama, get_hesaplama_by_id
 from utils import top_right_login, to_excel
 from session_config import init_session_state
 from constants import CONCRETE_OPTIONS, STEEL_OPTIONS, BOSLUK_OPTIONS, BV_OPTIONS
+from bridge_client import render_bridge_status, render_bridge_fetcher
 import etabs_service
 
 # Sayfa konfigürasyonu
@@ -25,6 +26,7 @@ setup_sidebar()
 top_right_login()
 
 st.title("Perde Kesme")
+render_bridge_status(key="perde_kesme_status_widget")
 
 
 def recalculate_single_row(row_dict: dict, calc_params: dict) -> dict:
@@ -393,14 +395,11 @@ with tabs[0]:
         # Ana Hesaplama Arayüzü
         st.subheader("Deprem Kombinasyon Seçimi")
         
-        combo_names = etabs_service.get_load_combinations()
+        combo_names = st.session_state.get("etabs_combinations", [])
         if not combo_names:
-            st.warning("⚠️ ETABS açık değil veya kombinasyonlar okunamadı. Lütfen STACONT Bridge'i veya ETABS'i çalıştırınız.")
-            st.stop()
-
-        df_pier_section = etabs_service.get_pier_section_properties()
-        if df_pier_section is None or df_pier_section.empty:
-            st.error("ETABS'ten Pier Section Properties verisi alınamadı.")
+            combo_names = etabs_service.get_load_combinations()
+        if not combo_names:
+            st.warning("⚠️ ETABS açık değil veya kombinasyonlar okunamadı. Lütfen STACONT Bridge'i çalıştırınız.")
             st.stop()
 
         col1, col2 = st.columns(2)
@@ -409,8 +408,9 @@ with tabs[0]:
             is_basement = st.checkbox("YAPI BODRUMLU MU?")
             if is_basement:
                 basement_deprem_combo = st.selectbox("Bodrum Kombinasyon", combo_names, key="basement_deprem_combo")
-                df_temp_basement = etabs_service.get_pier_forces_for_combination(basement_deprem_combo)
-                story_options = df_temp_basement['Story'].drop_duplicates().tolist() if df_temp_basement is not None else []
+                story_options = st.session_state.get("etabs_stories", [])
+                if not story_options:
+                    story_options = etabs_service.get_story_names()
                 basement_stories = st.multiselect("Bodrum Katlarını Seçiniz", story_options, key="basement_stories")
             
             selected_concrete = st.selectbox("Beton Sınıfı", list(CONCRETE_OPTIONS.keys()), key="concrete_class")
@@ -426,17 +426,36 @@ with tabs[0]:
             Mp_Md = st.number_input("Mp/Md Değeri", value=0.0, format="%.1f")
             is_sekil_712c = st.checkbox("Kesme Kuvvetini Şekil 7.12c'ye Göre Artır")
 
-        if st.button("Final Tabloyu Getir"):
-            with st.spinner("ETABS'ten veriler alınıyor ve tablo oluşturuluyor..."):
-                df_deprem = etabs_service.get_pier_forces_for_combination(main_deprem_combo)
-                if df_deprem is None or df_deprem.empty:
-                    st.error(f"'{main_deprem_combo}' kombinasyonu için veri çekilemedi.")
-                    st.stop()
+        if st.button("Final Tabloyu Getir", key="btn_run_perde_kesme"):
+            st.session_state["fetching_perde_kesme_active"] = True
 
-                main_table = df_deprem.rename(columns={'OutputCase': 'Deprem Kombinasyonu', 'V2': 'Deprem Yük'})
-                if is_basement and 'basement_stories' in locals() and basement_stories:
-                    df_bodrum = etabs_service.get_pier_forces_for_combination(basement_deprem_combo)
-                    if df_bodrum is not None and not df_bodrum.empty:
+        if st.session_state.get("fetching_perde_kesme_active"):
+            bundle = None
+            SapModel = etabs_service.get_active_sap_model()
+            if SapModel:
+                bundle = etabs_service.get_pier_bundle(main_deprem_combo)
+            else:
+                bundle = render_bridge_fetcher(
+                    endpoint="/api/pier_bundle",
+                    params={
+                        "combo": main_deprem_combo,
+                        "basement_combo": basement_deprem_combo if is_basement else ""
+                    },
+                    bundle_name="pier_bundle",
+                    key="perde_kesme_fetcher_widget"
+                )
+
+            if bundle and isinstance(bundle, dict) and bundle.get("success"):
+                st.session_state["fetching_perde_kesme_active"] = False
+                df_deprem = pd.DataFrame(bundle.get("pier_forces", []))
+                df_pier_section = pd.DataFrame(bundle.get("pier_section", []))
+                df_bodrum = pd.DataFrame(bundle.get("basement_forces", []))
+
+                if df_deprem.empty or df_pier_section.empty:
+                    st.error(f"'{main_deprem_combo}' kombinasyonu için veri çekilemedi. Modelinizin çözülmüş olduğundan emin olun.")
+                else:
+                    main_table = df_deprem.rename(columns={'OutputCase': 'Deprem Kombinasyonu', 'V2': 'Deprem Yük'})
+                    if is_basement and 'basement_stories' in locals() and basement_stories and not df_bodrum.empty:
                         df_bodrum = df_bodrum[df_bodrum["Story"].isin(basement_stories)]
                         df_bodrum = df_bodrum.rename(columns={'OutputCase': 'Bodrum Deprem Kombinasyon', 'V2': 'Bodrum Deprem Yük'})
                         main_table = pd.merge(main_table, df_bodrum, on=['Story', 'Pier'], how='left', suffixes=('', '_bodrum'))
@@ -444,10 +463,10 @@ with tabs[0]:
                         main_table["Deprem Yük"] = main_table["Bodrum Deprem Yük"].combine_first(main_table["Deprem Yük"])
                         main_table = main_table.drop(columns=['Bodrum Deprem Kombinasyon', 'Bodrum Deprem Yük'])
 
-                main_table = pd.merge(main_table, 
-                                    df_pier_section[['Story', 'Pier', 'WidthBot', 'ThickBot', 'CGBotZ', 'CGTopZ']], 
-                                    on=['Story', 'Pier'], 
-                                    how='left')
+                    main_table = pd.merge(main_table, 
+                                        df_pier_section[['Story', 'Pier', 'WidthBot', 'ThickBot', 'CGBotZ', 'CGTopZ']], 
+                                        on=['Story', 'Pier'], 
+                                        how='left')
 
                 # Yükseklik hesapları
                 df_pier_section[['CGTopZ', 'CGBotZ']] = df_pier_section[['CGTopZ', 'CGBotZ']].apply(pd.to_numeric, errors='coerce')
@@ -517,6 +536,7 @@ with tabs[0]:
                 
                 final_table = pd.DataFrame(computed_rows)
                 st.session_state["final_table"] = final_table
+                st.rerun()
 
         if "final_table" in st.session_state:
             active_calc_params = st.session_state.get("calc_params", {

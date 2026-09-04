@@ -121,35 +121,12 @@ with tabs[0]:
             st.stop()
 
     # Canlı ETABS Durumu
-    from bridge_client import render_bridge_status
+    from bridge_client import render_bridge_status, render_bridge_fetcher
     render_bridge_status(key="drift_bridge_status")
 
     # Yük Durumları ve Modal Verilerin Hazırlanması
     case_names = st.session_state.get("etabs_load_cases", []) or etabs_service.get_load_cases()
-
-    df_modal = pd.DataFrame()
-    # 1. Bridge veya COM'dan Modal veriyi al
-    df_modal_resp = etabs_service._fetch_from_bridge('/api/table', params={'name': 'Modal Participating Mass Ratios'})
-    if df_modal_resp and df_modal_resp.get("success") and df_modal_resp.get("data"):
-        df_modal = pd.DataFrame(df_modal_resp.get("data"))
-    else:
-        SapModel = etabs_service.get_active_sap_model()
-        if SapModel:
-            try:
-                SapModel.DatabaseTables.SetLoadCasesSelectedForDisplay([])
-                SapModel.DatabaseTables.SetLoadCombinationsSelectedForDisplay([])
-                SapModel.DatabaseTables.SetLoadPatternsSelectedForDisplay([])
-                ret_modal = SapModel.DatabaseTables.GetTableForDisplayArray('Modal Participating Mass Ratios', [], 'All', 1, [], 0, [])
-                cols_m = [c.strip() for c in ret_modal[2]] if ret_modal[2] else []
-                raw_m = ret_modal[4] if ret_modal[2] else []
-                df_modal = pd.DataFrame([raw_m[i:i + len(cols_m)] for i in range(0, len(raw_m), len(cols_m))], columns=cols_m) if cols_m else pd.DataFrame()
-            except Exception:
-                pass
-
-    if not df_modal.empty and "Case" in df_modal.columns:
-        unique_modal_cases = sorted(df_modal["Case"].unique())
-    else:
-        unique_modal_cases = case_names
+    unique_modal_cases = [c for c in case_names if "MODAL" in c.upper()] or case_names
 
     # =============================================================================
     # 3. Gerekli Girişlerin Tek Formda Toplanması
@@ -196,121 +173,176 @@ with tabs[0]:
         elif not selected_cases_y:
             st.error("Lütfen Y yönü için en az bir yük durumu seçiniz.")
         elif not selected_modal_cases:
-            st.error("Lütfen Modal Participating Mass Ratios için en az bir Case seçiniz.")
+            st.error("Lütfen Modal Tablosu için en az bir Case seçiniz.")
         elif Sds_DD2 == 0 or Sds_DD3 == 0:
             st.error("Hata: Sds değerleri sıfır olamaz.")
         else:
-            rows_y = [data_list_y[i: i + num_columns_y] for i in range(0, len(data_list_y), num_columns_y)]
-            df_y = pd.DataFrame(rows_y, columns=columns_y)
-            df_y.columns = df_y.columns.str.strip()
-            df_y["Direction"] = df_y["Direction"].astype(str).str.strip().str.upper()
-            df_y_filtered = df_y[df_y["Direction"] == "Y"]
-            df_y_final = df_y_filtered[required_columns] if set(required_columns).issubset(df_y_filtered.columns) else df_y_filtered
+            st.session_state["drift_calc_active"] = True
+            st.session_state["drift_calc_params"] = {
+                "selected_cases_x": selected_cases_x,
+                "selected_cases_y": selected_cases_y,
+                "selected_modal_cases": selected_modal_cases,
+                "bina_turu": bina_turu,
+                "Sds_DD2": Sds_DD2,
+                "Sd1_DD2": Sd1_DD2,
+                "Sds_DD3": Sds_DD3,
+                "Sd1_DD3": Sd1_DD3,
+                "I_input": I_input,
+                "R_input": R_input
+            }
 
-            # 4.2 Modal Participating Mass Ratios ile Tx ve Ty hesaplanması
-            df_modal_filtered = df_modal[df_modal["Case"].isin(selected_modal_cases)]
-            Tx = None
-            Ty = None
-            if "UX" in df_modal_filtered.columns and "Period" in df_modal_filtered.columns:
-                df_modal_filtered["UX_numeric"] = pd.to_numeric(df_modal_filtered["UX"], errors='coerce')
-                max_ux = df_modal_filtered["UX_numeric"].max()
-                Tx_array = df_modal_filtered.loc[df_modal_filtered["UX_numeric"] == max_ux, "Period"].unique()
-                if len(Tx_array) > 0:
-                    try:
-                        Tx = float(Tx_array[0])
-                    except:
-                        Tx = None
-            if "UY" in df_modal_filtered.columns and "Period" in df_modal_filtered.columns:
-                df_modal_filtered["UY_numeric"] = pd.to_numeric(df_modal_filtered["UY"], errors='coerce')
-                max_uy = df_modal_filtered["UY_numeric"].max()
-                Ty_array = df_modal_filtered.loc[df_modal_filtered["UY_numeric"] == max_uy, "Period"].unique()
-                if len(Ty_array) > 0:
-                    try:
-                        Ty = float(Ty_array[0])
-                    except:
-                        Ty = None
-            if Tx is None or Ty is None:
-                st.error("Tx veya Ty değeri hesaplanamadı. Lütfen Modal Participating Mass Ratios tablosundaki Case değerlerini kontrol ediniz.")
+    if st.session_state.get("drift_calc_active"):
+        params = st.session_state["drift_calc_params"]
+        bundle = None
+        SapModel = etabs_service.get_active_sap_model()
+        if SapModel:
+            bundle = etabs_service.get_drift_bundle(
+                case_x=",".join(params["selected_cases_x"]),
+                case_y=",".join(params["selected_cases_y"])
+            )
+        else:
+            bundle = render_bridge_fetcher(
+                endpoint="/api/drift_bundle",
+                params={
+                    "case_x": ",".join(params["selected_cases_x"]),
+                    "case_y": ",".join(params["selected_cases_y"])
+                },
+                bundle_name="drift_bundle",
+                key="drift_bridge_fetcher_widget"
+            )
+
+        if bundle and isinstance(bundle, dict) and bundle.get("success"):
+            st.session_state["drift_calc_active"] = False
+            df_drifts = pd.DataFrame(bundle.get("story_drifts", []))
+            df_modal = pd.DataFrame(bundle.get("modal_ratios", []))
+
+            if df_drifts.empty:
+                st.error("ETABS'ten Story Drifts verisi alınamadı. Modelinizin çözülmüş olduğundan emin olun.")
             else:
-                # 4.3 DD2 ve DD3 hesaplamaları (Sae ve λ değerleri)
-                Tl = 6
-                Tb_DD2 = Sd1_DD2 / Sds_DD2
-                Ta_DD2 = 0.2 * Tb_DD2
-                Tb_DD3 = Sd1_DD3 / Sds_DD3
-                Ta_DD3 = 0.2 * Tb_DD3
+                df_drifts["Direction"] = df_drifts["Direction"].astype(str).str.strip().str.upper()
+                
+                # 4.1 X ve Y yönü için filtreleme
+                df_x_filtered = df_drifts[(df_drifts["Direction"] == "X") & (df_drifts["OutputCase"].isin(params["selected_cases_x"]))].copy()
+                df_y_filtered = df_drifts[(df_drifts["Direction"] == "Y") & (df_drifts["OutputCase"].isin(params["selected_cases_y"]))].copy()
 
-                if 0 <= Tx <= Ta_DD2:
-                    Sae_x_DD2 = (0.4 + 0.6 * (Tx / Ta_DD2)) * Sds_DD2
-                elif Ta_DD2 < Tx <= Tb_DD2:
-                    Sae_x_DD2 = Sds_DD2
-                elif Tb_DD2 < Tx <= Tl:
-                    Sae_x_DD2 = Sd1_DD2 / Tx
+                required_columns = ["Story", "OutputCase", "Direction", "Drift"]
+                df_x_final = df_x_filtered[required_columns] if set(required_columns).issubset(df_x_filtered.columns) else df_x_filtered
+                df_y_final = df_y_filtered[required_columns] if set(required_columns).issubset(df_y_filtered.columns) else df_y_filtered
+
+                # 4.2 Modal Participating Mass Ratios ile Tx ve Ty hesaplanması
+                df_modal_filtered = df_modal[df_modal["Case"].isin(params["selected_modal_cases"])].copy()
+                Tx = None
+                Ty = None
+                if "UX" in df_modal_filtered.columns and "Period" in df_modal_filtered.columns:
+                    df_modal_filtered["UX_numeric"] = pd.to_numeric(df_modal_filtered["UX"], errors='coerce')
+                    max_ux = df_modal_filtered["UX_numeric"].max()
+                    Tx_array = df_modal_filtered.loc[df_modal_filtered["UX_numeric"] == max_ux, "Period"].unique()
+                    if len(Tx_array) > 0:
+                        try:
+                            Tx = float(Tx_array[0])
+                        except:
+                            Tx = None
+                if "UY" in df_modal_filtered.columns and "Period" in df_modal_filtered.columns:
+                    df_modal_filtered["UY_numeric"] = pd.to_numeric(df_modal_filtered["UY"], errors='coerce')
+                    max_uy = df_modal_filtered["UY_numeric"].max()
+                    Ty_array = df_modal_filtered.loc[df_modal_filtered["UY_numeric"] == max_uy, "Period"].unique()
+                    if len(Ty_array) > 0:
+                        try:
+                            Ty = float(Ty_array[0])
+                        except:
+                            Ty = None
+                if Tx is None or Ty is None:
+                    st.error("Tx veya Ty değeri hesaplanamadı. Lütfen Modal Tablosundaki Case seçimlerini kontrol ediniz.")
                 else:
-                    Sae_x_DD2 = (Sd1_DD2 * Tl) / (Tx ** 2)
-                if 0 <= Ty <= Ta_DD2:
-                    Sae_y_DD2 = (0.4 + 0.6 * (Ty / Ta_DD2)) * Sds_DD2
-                elif Ta_DD2 < Ty <= Tb_DD2:
-                    Sae_y_DD2 = Sds_DD2
-                elif Tb_DD2 < Ty <= Tl:
-                    Sae_y_DD2 = Sd1_DD2 / Ty
-                else:
-                    Sae_y_DD2 = (Sd1_DD2 * Tl) / (Ty ** 2)
+                    # 4.3 DD2 ve DD3 hesaplamaları (Sae ve λ değerleri)
+                    Sds_DD2 = params["Sds_DD2"]
+                    Sd1_DD2 = params["Sd1_DD2"]
+                    Sds_DD3 = params["Sds_DD3"]
+                    Sd1_DD3 = params["Sd1_DD3"]
+                    R = params["R_input"]
+                    I = params["I_input"]
 
-                if 0 <= Tx <= Ta_DD3:
-                    Sae_x_DD3 = (0.4 + 0.6 * (Tx / Ta_DD3)) * Sds_DD3
-                elif Ta_DD3 < Tx <= Tb_DD3:
-                    Sae_x_DD3 = Sds_DD3
-                elif Tb_DD3 < Tx <= Tl:
-                    Sae_x_DD3 = Sd1_DD3 / Tx
-                else:
-                    Sae_x_DD3 = (Sd1_DD3 * Tl) / (Tx ** 2)
-                if 0 <= Ty <= Ta_DD3:
-                    Sae_y_DD3 = (0.4 + 0.6 * (Ty / Ta_DD3)) * Sds_DD3
-                elif Ta_DD3 < Ty <= Tb_DD3:
-                    Sae_y_DD3 = Sds_DD3
-                elif Tb_DD3 < Ty <= Tl:
-                    Sae_y_DD3 = Sd1_DD3 / Ty
-                else:
-                    Sae_y_DD3 = (Sd1_DD3 * Tl) / (Ty ** 2)
+                    Tl = 6
+                    Tb_DD2 = Sd1_DD2 / Sds_DD2
+                    Ta_DD2 = 0.2 * Tb_DD2
+                    Tb_DD3 = Sd1_DD3 / Sds_DD3
+                    Ta_DD3 = 0.2 * Tb_DD3
 
-                lambda_x = Sae_x_DD3 / Sae_x_DD2
-                lambda_y = Sae_y_DD3 / Sae_y_DD2
+                    if 0 <= Tx <= Ta_DD2:
+                        Sae_x_DD2 = (0.4 + 0.6 * (Tx / Ta_DD2)) * Sds_DD2
+                    elif Ta_DD2 < Tx <= Tb_DD2:
+                        Sae_x_DD2 = Sds_DD2
+                    elif Tb_DD2 < Tx <= Tl:
+                        Sae_x_DD2 = Sd1_DD2 / Tx
+                    else:
+                        Sae_x_DD2 = (Sd1_DD2 * Tl) / (Tx ** 2)
+                    if 0 <= Ty <= Ta_DD2:
+                        Sae_y_DD2 = (0.4 + 0.6 * (Ty / Ta_DD2)) * Sds_DD2
+                    elif Ta_DD2 < Ty <= Tb_DD2:
+                        Sae_y_DD2 = Sds_DD2
+                    elif Tb_DD2 < Ty <= Tl:
+                        Sae_y_DD2 = Sd1_DD2 / Ty
+                    else:
+                        Sae_y_DD2 = (Sd1_DD2 * Tl) / (Ty ** 2)
 
-                # 4.4 Sınır Değeri ve Öteleme Hesaplamaları
-                limit_value = Ks * K
-                df_x_final["Sınır Değeri"] = limit_value
-                df_y_final["Sınır Değeri"] = limit_value
+                    if 0 <= Tx <= Ta_DD3:
+                        Sae_x_DD3 = (0.4 + 0.6 * (Tx / Ta_DD3)) * Sds_DD3
+                    elif Ta_DD3 < Tx <= Tb_DD3:
+                        Sae_x_DD3 = Sds_DD3
+                    elif Tb_DD3 < Tx <= Tl:
+                        Sae_x_DD3 = Sd1_DD3 / Tx
+                    else:
+                        Sae_x_DD3 = (Sd1_DD3 * Tl) / (Tx ** 2)
+                    if 0 <= Ty <= Ta_DD3:
+                        Sae_y_DD3 = (0.4 + 0.6 * (Ty / Ta_DD3)) * Sds_DD3
+                    elif Ta_DD3 < Ty <= Tb_DD3:
+                        Sae_y_DD3 = Sds_DD3
+                    elif Tb_DD3 < Ty <= Tl:
+                        Sae_y_DD3 = Sd1_DD3 / Ty
+                    else:
+                        Sae_y_DD3 = (Sd1_DD3 * Tl) / (Ty ** 2)
 
-                df_x_final["Drift_numeric"] = pd.to_numeric(df_x_final["Drift"], errors="coerce")
-                df_x_final["λ * δᵢ,ₘₐₓ / hᵢ"] = (lambda_x * R * df_x_final["Drift_numeric"]) / I
+                    lambda_x = Sae_x_DD3 / Sae_x_DD2
+                    lambda_y = Sae_y_DD3 / Sae_y_DD2
 
-                df_y_final["Drift_numeric"] = pd.to_numeric(df_y_final["Drift"], errors="coerce")
-                df_y_final["λ * δᵢ,ₘₐₓ / hᵢ"] = (lambda_y * R * df_y_final["Drift_numeric"]) / I
+                    # 4.4 Sınır Değeri ve Öteleme Hesaplamaları
+                    Ks = 0.008 if "0.008" in params["bina_turu"] else 0.016
+                    K = 1.0  # Betonarme
+                    limit_value = Ks * K
+                    df_x_final["Sınır Değeri"] = limit_value
+                    df_y_final["Sınır Değeri"] = limit_value
 
-                output_columns = ["Story", "OutputCase", "Direction", "Drift", "λ * δᵢ,ₘₐₓ / hᵢ", "Sınır Değeri"]
-                df_x_final = df_x_final[output_columns]
-                df_y_final = df_y_final[output_columns]
+                    df_x_final["Drift_numeric"] = pd.to_numeric(df_x_final["Drift"], errors="coerce")
+                    df_x_final["λ * δᵢ,ₘₐₓ / hᵢ"] = (lambda_x * R * df_x_final["Drift_numeric"]) / I
 
-                df_x_final["Durum"] = df_x_final.apply(
-                    lambda row: "✅" if row["λ * δᵢ,ₘₐₓ / hᵢ"] < row["Sınır Değeri"] else "❌", axis=1
-                )
-                df_y_final["Durum"] = df_y_final.apply(
-                    lambda row: "✅" if row["λ * δᵢ,ₘₐₓ / hᵢ"] < row["Sınır Değeri"] else "❌", axis=1
-                )
+                    df_y_final["Drift_numeric"] = pd.to_numeric(df_y_final["Drift"], errors="coerce")
+                    df_y_final["λ * δᵢ,ₘₐₓ / hᵢ"] = (lambda_y * R * df_y_final["Drift_numeric"]) / I
 
-                final_columns = ["Story", "OutputCase", "Direction", "Drift", "λ * δᵢ,ₘₐₓ / hᵢ", "Sınır Değeri", "Durum"]
-                df_x_final = df_x_final[final_columns]
-                df_y_final = df_y_final[final_columns]
+                    output_columns = ["Story", "OutputCase", "Direction", "Drift", "λ * δᵢ,ₘₐₓ / hᵢ", "Sınır Değeri"]
+                    df_x_final = df_x_final[output_columns]
+                    df_y_final = df_y_final[output_columns]
 
-                # Sütun isimlerini güncelleyelim: Story -> Kat, OutputCase -> Yük, Direction -> Yön
-                rename_mapping = {"Story": "Kat", "OutputCase": "Yük", "Direction": "Yön"}
-                df_x_final = df_x_final.rename(columns=rename_mapping)
-                df_y_final = df_y_final.rename(columns=rename_mapping)
+                    df_x_final["Durum"] = df_x_final.apply(
+                        lambda row: "✅" if row["λ * δᵢ,ₘₐₓ / hᵢ"] < row["Sınır Değeri"] else "❌", axis=1
+                    )
+                    df_y_final["Durum"] = df_y_final.apply(
+                        lambda row: "✅" if row["λ * δᵢ,ₘₐₓ / hᵢ"] < row["Sınır Değeri"] else "❌", axis=1
+                    )
 
-                # Hesaplama sonuçlarını session_state'e kaydediyoruz
-                st.session_state["df_x_final"] = df_x_final
-                st.session_state["df_y_final"] = df_y_final
-                st.session_state["calculation_done"] = True
+                    final_columns = ["Story", "OutputCase", "Direction", "Drift", "λ * δᵢ,ₘₐₓ / hᵢ", "Sınır Değeri", "Durum"]
+                    df_x_final = df_x_final[final_columns]
+                    df_y_final = df_y_final[final_columns]
+
+                    # Sütun isimlerini güncelleyelim: Story -> Kat, OutputCase -> Yük, Direction -> Yön
+                    rename_mapping = {"Story": "Kat", "OutputCase": "Yük", "Direction": "Yön"}
+                    df_x_final = df_x_final.rename(columns=rename_mapping)
+                    df_y_final = df_y_final.rename(columns=rename_mapping)
+
+                    # Hesaplama sonuçlarını session_state'e kaydediyoruz
+                    st.session_state["df_x_final"] = df_x_final
+                    st.session_state["df_y_final"] = df_y_final
+                    st.session_state["calculation_done"] = True
+                    st.rerun()
 
     # =============================================================================
     # Hesaplama Sonuçlarının (Kontrol Ekranının) Gösterilmesi

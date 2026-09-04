@@ -8,7 +8,7 @@ from database import save_hesaplama, get_hesaplamalar, get_hesaplama_by_id
 from utils import top_right_login, to_excel
 from session_config import init_session_state
 from constants import CONCRETE_OPTIONS
-from bridge_client import render_bridge_status
+from bridge_client import render_bridge_status, render_bridge_fetcher
 
 # Streamlit page config
 st.set_page_config(
@@ -133,68 +133,73 @@ with tabs[0]:
             paspayi_cm = st.number_input("Paspayı (cm):", value=2.5, min_value=1.0, max_value=10.0, step=0.5)
             config_mapping["paspayi_cm"] = paspayi_cm
 
-        if st.button("Final Tabloyu Getir"):
-            with st.spinner("ETABS kiriş verileri alınıyor..."):
-                # Beam forces
-                df_beams = pd.DataFrame()
-                resp = etabs_service._fetch_from_bridge('/api/table', params={'name': 'Element Forces - Beams', 'combo': main_combo})
-                if resp and resp.get("success") and resp.get("data"):
-                    df_beams = pd.DataFrame(resp.get("data"))
-                else:
-                    Sap = etabs_service.get_active_sap_model()
-                    if Sap:
-                        try:
-                            Sap.DatabaseTables.SetLoadCasesSelectedForDisplay([])
-                            Sap.DatabaseTables.SetLoadCombinationsSelectedForDisplay([main_combo])
-                            Sap.DatabaseTables.SetLoadPatternsSelectedForDisplay([])
-                            ret = Sap.DatabaseTables.GetTableForDisplayArray('Element Forces - Beams', [], 'All', 1, [], 0, [])
-                            cols = [c.strip() for c in ret[2]] if ret[2] else []
-                            raw = ret[4] if ret[2] else []
-                            df_beams = pd.DataFrame([raw[i:i + len(cols)] for i in range(0, len(raw), len(cols))], columns=cols)
-                        except Exception:
-                            pass
+        if st.button("Final Tabloyu Getir", key="btn_run_kiris"):
+            st.session_state["fetching_kiris_active"] = True
+
+        if st.session_state.get("fetching_kiris_active"):
+            bundle = None
+            SapModel = etabs_service.get_active_sap_model()
+            if SapModel:
+                bundle = etabs_service.get_beam_bundle(main_combo)
+            else:
+                bundle = render_bridge_fetcher(
+                    endpoint="/api/beam_bundle",
+                    params={"combo": main_combo},
+                    bundle_name="beam_bundle",
+                    key="kiris_bridge_fetcher_widget"
+                )
+
+            if bundle and isinstance(bundle, dict) and bundle.get("success"):
+                st.session_state["fetching_kiris_active"] = False
+                df_beams = pd.DataFrame(bundle.get("beam_forces", []))
+                df_assign = pd.DataFrame(bundle.get("frame_assignments", []))
+                df_defs = pd.DataFrame(bundle.get("section_definitions", []))
 
                 if df_beams.empty or 'V2' not in df_beams.columns:
-                    st.error("Kiriş kesme kuvvetleri alınamadı.")
-                    st.stop()
-
-                df_beams['V2'] = pd.to_numeric(df_beams['V2'], errors='coerce')
-                max_idx = df_beams.groupby(['Story', 'Beam'], sort=False)['V2'].apply(lambda x: x.abs().idxmax())
-                filtered_df = df_beams.loc[max_idx].sort_index().reset_index(drop=True)[['Story', 'Beam', 'OutputCase', 'V2']]
-
-                # Frame section properties
-                df_assign = pd.DataFrame()
-                resp_a = etabs_service._fetch_from_bridge('/api/table', params={'name': 'Frame Assignments - Section Properties'})
-                if resp_a and resp_a.get("success") and resp_a.get("data"):
-                    df_assign = pd.DataFrame(resp_a.get("data"))
+                    st.error(f"'{main_combo}' kombinasyonu için kiriş kesme kuvvetleri alınamadı. Modelinizin çözülmüş olduğundan emin olun.")
                 else:
-                    Sap = etabs_service.get_active_sap_model()
-                    if Sap:
-                        try:
-                            ret_a = Sap.DatabaseTables.GetTableForDisplayArray('Frame Assignments - Section Properties', [], 'All', 1, [], 0, [])
-                            cols_a = [c.strip() for c in ret_a[2]] if ret_a[2] else []
-                            raw_a = ret_a[4] if ret_a[2] else []
-                            df_assign = pd.DataFrame([raw_a[i:i + len(cols_a)] for i in range(0, len(raw_a), len(cols_a))], columns=cols_a)
-                        except Exception:
-                            pass
+                    df_beams['V2'] = pd.to_numeric(df_beams['V2'], errors='coerce')
+                    max_idx = df_beams.groupby(['Story', 'Beam'], sort=False)['V2'].apply(lambda x: x.abs().idxmax())
+                    filtered_df = df_beams.loc[max_idx].sort_index().reset_index(drop=True)[['Story', 'Beam', 'OutputCase', 'V2']]
 
-                if not df_assign.empty:
-                    if 'DesignType' in df_assign.columns:
-                        df_assign = df_assign[df_assign['DesignType'] == 'Beam']
-                    df_assign = df_assign.rename(columns={'FrameObjectName': 'Beam', 'AutoSelect': 'SectProp'})
-                    filtered_df = pd.merge(filtered_df, df_assign[['Story', 'Beam', 'SectProp']].drop_duplicates(), on=['Story', 'Beam'], how='left')
+                    # Frame section properties
+                    if not df_assign.empty:
+                        beam_col = next((c for c in ['Beam', 'FrameObjectName', 'Label', 'Frame'] if c in df_assign.columns), None)
+                        if beam_col and beam_col != 'Beam':
+                            df_assign['Beam'] = df_assign[beam_col]
+                        if 'SectProp' not in df_assign.columns and 'AutoSelect' in df_assign.columns:
+                            df_assign['SectProp'] = df_assign['AutoSelect']
+                        col_props = df_assign[['Story', 'Beam', 'SectProp']].drop_duplicates()
+                        filtered_df = pd.merge(filtered_df, col_props, on=['Story', 'Beam'], how='left')
 
-                filtered_df['Beton Sınıfı'] = selected_concrete
-                filtered_df['fck'] = concrete_value / 1000.0
-                filtered_df['fcd'] = filtered_df['fck'] / 1.5
-                filtered_df['fctd'] = (0.35 * (filtered_df['fck'] ** 0.5)) / 1.5
-                filtered_df['Width'] = 25.0
-                filtered_df['Depth'] = 50.0
-                filtered_df['KOL'] = 2
-                filtered_df['ÇAP'] = 8
-                filtered_df['ARALIK'] = 15
+                    # Kesit boyutları (t2 = genişlik, t3 = yükseklik - metre cinsinden, cm'ye çevir)
+                    if not df_defs.empty and 'Name' in df_defs.columns:
+                        df_defs_clean = df_defs.rename(columns={'Name': 'SectProp'})
+                        if 't2' in df_defs_clean.columns and 't3' in df_defs_clean.columns:
+                            df_defs_clean['Width'] = pd.to_numeric(df_defs_clean['t2'], errors='coerce') * 100.0
+                            df_defs_clean['Depth'] = pd.to_numeric(df_defs_clean['t3'], errors='coerce') * 100.0
+                            filtered_df = pd.merge(filtered_df, df_defs_clean[['SectProp', 'Width', 'Depth']].drop_duplicates(), on='SectProp', how='left')
 
-                st.session_state["kiris_final_table"] = filtered_df
+                    if 'Width' not in filtered_df.columns or filtered_df['Width'].isnull().all():
+                        filtered_df['Width'] = 25.0
+                    else:
+                        filtered_df['Width'] = filtered_df['Width'].fillna(25.0)
+
+                    if 'Depth' not in filtered_df.columns or filtered_df['Depth'].isnull().all():
+                        filtered_df['Depth'] = 50.0
+                    else:
+                        filtered_df['Depth'] = filtered_df['Depth'].fillna(50.0)
+
+                    filtered_df['Beton Sınıfı'] = selected_concrete
+                    filtered_df['fck'] = concrete_value / 1000.0
+                    filtered_df['fcd'] = filtered_df['fck'] / 1.5
+                    filtered_df['fctd'] = (0.35 * (filtered_df['fck'] ** 0.5)) / 1.5
+                    filtered_df['KOL'] = 2
+                    filtered_df['ÇAP'] = 8
+                    filtered_df['ARALIK'] = 15
+
+                    st.session_state["kiris_final_table"] = filtered_df
+                    st.rerun()
 
         if "kiris_final_table" in st.session_state:
             disp_df = st.session_state["kiris_final_table"]
